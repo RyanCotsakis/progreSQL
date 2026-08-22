@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy.orm import sessionmaker
 
 from app.db import Base, make_engine
-from app.services import (ValidationError, add_exercise_to_workout, create_exercise, create_workout, log_workout, session_details, set_exercise_state, set_workout_exercises, state_for_date, workout_exercises_for_date)
+from app.services import (ValidationError, add_exercise_to_workout, create_exercise, create_exercise_with_initial_state, create_workout, deactivate_exercise, deactivate_workout, exercises, log_workout, recent_sessions, session_details, set_exercise_state, set_workout_exercises, state_for_date, workout_exercises_for_date, workouts)
 
 
 @pytest.fixture
@@ -29,6 +29,13 @@ def test_create_exercise_workout_and_session(session):
     assert push.exercises[0].exercise_id == bench.exercise_id
     record = log_workout(session, push.workout_id, date(2026, 1, 15))
     assert record.workout_date == date(2026, 1, 15)
+
+
+def test_create_exercise_with_initial_state(session):
+    exercise = create_exercise_with_initial_state(session, "Deadlift", "Back", "Barbell", None, date(2026, 1, 1), 100, 5, 3)
+    state = state_for_date(session, exercise.exercise_id, date(2026, 1, 1))
+    assert state is not None
+    assert (state.weight, state.max_reps, state.sets) == (100, 5, 3)
 
 
 def test_scd2_future_change_closes_previous_and_resolves_dates(session):
@@ -95,3 +102,16 @@ def test_workout_composition_is_effective_dated_and_same_day_edits_apply_to_sess
     assert [item.exercise.exercise_name for item in workout_exercises_for_date(session, push.workout_id, date(2026, 1, 15))] == ["Squat", "Bench Press"]
     _, details = session_details(session, january_session.workout_session_id)
     assert [exercise.exercise_name for exercise, _ in details] == ["Squat", "Bench Press"]
+
+
+def test_soft_deleted_entities_are_hidden_from_active_lists_but_remain_in_history(session):
+    bench, push = setup_push(session)
+    record = log_workout(session, push.workout_id, date(2026, 1, 15))
+    deactivate_exercise(session, bench)
+    deactivate_workout(session, push)
+
+    assert exercises(session) == []
+    assert workouts(session) == []
+    assert recent_sessions(session)[0].workout_session_id == record.workout_session_id
+    _, details = session_details(session, record.workout_session_id)
+    assert details[0][0].exercise_name == "Bench Press"

@@ -25,6 +25,30 @@ def create_exercise(session: Session, name: str, muscle_group: str | None = None
     return exercise
 
 
+def create_exercise_with_initial_state(session: Session, name: str, muscle_group: str | None, equipment: str | None, description: str | None, effective_from: date, weight: Decimal | float | str, max_reps: int, sets: int, notes: str | None = None) -> Exercise:
+    """Create an exercise and its first prescription in one transaction."""
+    weight = Decimal(str(weight))
+    if weight < 0 or max_reps <= 0 or sets <= 0:
+        raise ValidationError("Weight must be non-negative; reps and sets must be positive.")
+    exercise = Exercise(exercise_name=name.strip(), muscle_group=muscle_group or None, equipment=equipment or None, description=description or None)
+    session.add(exercise)
+    try:
+        session.flush()
+        session.add(ExerciseSettingsHistory(
+            exercise_id=exercise.exercise_id,
+            effective_from=effective_from,
+            weight=weight,
+            max_reps=max_reps,
+            sets=sets,
+            notes=notes or None,
+        ))
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raise ValidationError("An exercise with that name already exists.") from exc
+    return exercise
+
+
 def update_exercise(session: Session, exercise: Exercise, name: str, muscle_group: str | None, equipment: str | None, description: str | None) -> None:
     exercise.exercise_name, exercise.muscle_group, exercise.equipment, exercise.description = name.strip(), muscle_group or None, equipment or None, description or None
     try:
@@ -52,6 +76,16 @@ def update_workout(session: Session, workout: Workout, name: str, description: s
     except IntegrityError as exc:
         session.rollback()
         raise ValidationError("A workout with that name already exists.") from exc
+
+
+def deactivate_exercise(session: Session, exercise: Exercise) -> None:
+    exercise.is_active = False
+    session.commit()
+
+
+def deactivate_workout(session: Session, workout: Workout) -> None:
+    workout.is_active = False
+    session.commit()
 
 
 def workout_exercises_for_date(session: Session, workout_id: int, on_date: date) -> list[WorkoutExercise]:
@@ -92,7 +126,6 @@ def set_workout_exercises(session: Session, workout: Workout, exercise_ids: list
             effective_to=next_change,
         ))
     session.commit()
-    session.expire(workout, ["exercises"])
 
 
 def add_exercise_to_workout(session: Session, workout: Workout, exercise: Exercise) -> None:
@@ -174,11 +207,11 @@ def log_workout(session: Session, workout_id: int, workout_date: date, notes: st
 
 
 def workouts(session: Session) -> list[Workout]:
-    return list(session.scalars(select(Workout).order_by(Workout.workout_name)))
+    return list(session.scalars(select(Workout).where(Workout.is_active.is_(True)).order_by(Workout.workout_name)))
 
 
 def exercises(session: Session) -> list[Exercise]:
-    return list(session.scalars(select(Exercise).order_by(Exercise.exercise_name)))
+    return list(session.scalars(select(Exercise).where(Exercise.is_active.is_(True)).order_by(Exercise.exercise_name)))
 
 
 def recent_sessions(session: Session, limit: int = 12) -> list[WorkoutSession]:

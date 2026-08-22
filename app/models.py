@@ -4,7 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -22,6 +22,7 @@ class Exercise(TimestampMixin, Base):
     muscle_group: Mapped[Optional[str]] = mapped_column(String(80))
     equipment: Mapped[Optional[str]] = mapped_column(String(80))
     description: Mapped[Optional[str]] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
     settings_history: Mapped[list["ExerciseSettingsHistory"]] = relationship(back_populates="exercise", cascade="all, delete-orphan")
 
 
@@ -30,6 +31,7 @@ class Workout(TimestampMixin, Base):
     workout_id: Mapped[int] = mapped_column(primary_key=True)
     workout_name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
     exercises: Mapped[list["WorkoutExercise"]] = relationship(back_populates="workout", cascade="all, delete-orphan", order_by="WorkoutExercise.effective_from, WorkoutExercise.exercise_order")
     sessions: Mapped[list["WorkoutSession"]] = relationship(back_populates="workout")
 
