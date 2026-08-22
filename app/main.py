@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import calendar
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -17,7 +18,7 @@ from sqlalchemy import select
 
 from app.db import get_session
 from app.models import Exercise, ExerciseSettingsHistory, Workout
-from app.services import (ValidationError, add_exercise_to_workout, create_exercise, create_workout, exercises, log_workout, move_workout_exercise, recent_sessions, remove_exercise_from_workout, session_details, set_exercise_state, state_for_date, update_exercise, update_workout, workouts)
+from app.services import (ValidationError, create_exercise, create_workout, exercises, log_workout, move_workout_exercise, recent_sessions, session_details, set_exercise_state, set_workout_exercises, state_for_date, update_exercise, update_workout, workout_exercises_for_date, workouts)
 
 st.set_page_config(page_title="Gym Tracker", page_icon="🏋️", layout="wide")
 
@@ -43,53 +44,68 @@ def home(session):
     if sessions: st.dataframe([{"Date": item.workout_date, "Workout": item.workout.workout_name} for item in sessions], hide_index=True, use_container_width=True)
     else: st.caption("No workouts logged yet.")
 
-def log_page(session):
-    st.title("Log workout")
-    all_workouts = workouts(session)
-    if not all_workouts: st.info("Create a workout first."); return
-    choices = {w.workout_name: w for w in all_workouts}
-    selected_name = st.selectbox("Workout", choices)
-    selected = choices[selected_name]
-    workout_date = st.date_input("Date", date.today())
-    st.subheader(selected.workout_name)
-    for item in selected.exercises:
-        st.write(f"**{item.exercise.exercise_name}**  \n{fmt(state_for_date(session, item.exercise_id, workout_date))}")
-    if st.button("Log Workout", type="primary"):
-        flash(lambda: log_workout(session, selected.workout_id, workout_date))
-
 def workouts_page(session):
     st.title("Workouts")
-    with st.expander("Create workout"):
+    create_option = "Create workout"
+    all_workouts = workouts(session)
+    selection = st.selectbox(
+        "Workout",
+        [create_option, *all_workouts],
+        format_func=lambda item: item if isinstance(item, str) else item.workout_name,
+    )
+    if selection == create_option:
+        st.subheader("Create workout")
         with st.form("new_workout"):
             name = st.text_input("Name"); desc = st.text_area("Description")
             if st.form_submit_button("Create"): flash(lambda: create_workout(session, name, desc))
-    all_workouts = workouts(session)
-    if not all_workouts: return
-    workout = st.selectbox("Edit workout", all_workouts, format_func=lambda w: w.workout_name)
+        return
+    workout = selection
     with st.form("edit_workout"):
         name = st.text_input("Name", workout.workout_name); desc = st.text_area("Description", workout.description or "")
         if st.form_submit_button("Save details"): flash(lambda: update_workout(session, workout, name, desc))
-    available = [e for e in exercises(session) if not any(row.exercise_id == e.exercise_id for row in workout.exercises)]
-    if available:
-        exercise = st.selectbox("Add exercise", available, format_func=lambda e: e.exercise_name)
-        if st.button("Add to workout"): flash(lambda: add_exercise_to_workout(session, workout, exercise))
-    st.subheader("Exercise order")
-    for index, item in enumerate(workout.exercises):
+    effective_from = st.date_input("Change effective from", date.today(), key=f"workout_date_{workout.workout_id}")
+    current_items = workout_exercises_for_date(session, workout.workout_id, effective_from)
+    all_exercises = exercises(session)
+    selected_exercises = st.multiselect(
+        "Exercises",
+        all_exercises,
+        default=[item.exercise for item in current_items],
+        format_func=lambda exercise: exercise.exercise_name,
+        key=f"workout_exercises_{workout.workout_id}_{effective_from.isoformat()}",
+        help="Selected exercises are included in this workout from the effective date. Save to apply changes.",
+    )
+    if st.button("Save exercises", type="primary"):
+        current_ids = [item.exercise_id for item in current_items]
+        selected_ids = [exercise.exercise_id for exercise in selected_exercises]
+        ordered_ids = [exercise_id for exercise_id in current_ids if exercise_id in selected_ids]
+        ordered_ids.extend(exercise_id for exercise_id in selected_ids if exercise_id not in ordered_ids)
+        flash(lambda: set_workout_exercises(session, workout, ordered_ids, effective_from))
+        st.rerun()
+    st.subheader("Exercises")
+    if not current_items:
+        st.caption("No exercises are configured for this date.")
+    for index, item in enumerate(current_items):
         cols = st.columns([7, 1, 1, 1])
         cols[0].write(f"{index + 1}. {item.exercise.exercise_name}")
-        if cols[1].button("↑", key=f"up{item.exercise_id}"): move_workout_exercise(session, workout, item.exercise_id, -1); st.rerun()
-        if cols[2].button("↓", key=f"down{item.exercise_id}"): move_workout_exercise(session, workout, item.exercise_id, 1); st.rerun()
-        if cols[3].button("Remove", key=f"rm{item.exercise_id}"): remove_exercise_from_workout(session, workout, item.exercise_id); st.rerun()
+        if cols[1].button("↑", key=f"up{item.workout_exercise_id}"): move_workout_exercise(session, workout, item.exercise_id, -1, effective_from); st.rerun()
+        if cols[2].button("↓", key=f"down{item.workout_exercise_id}"): move_workout_exercise(session, workout, item.exercise_id, 1, effective_from); st.rerun()
 
 def exercises_page(session):
     st.title("Exercises")
-    with st.expander("Create exercise"):
+    create_option = "Create exercise"
+    all_exercises = exercises(session)
+    selection = st.selectbox(
+        "Exercise",
+        [create_option, *all_exercises],
+        format_func=lambda item: item if isinstance(item, str) else item.exercise_name,
+    )
+    if selection == create_option:
+        st.subheader("Create exercise")
         with st.form("new_exercise"):
             name = st.text_input("Name"); group = st.text_input("Muscle group"); equipment = st.text_input("Equipment"); desc = st.text_area("Description")
             if st.form_submit_button("Create"): flash(lambda: create_exercise(session, name, group, equipment, desc))
-    all_exercises = exercises(session)
-    if not all_exercises: return
-    exercise = st.selectbox("Exercise", all_exercises, format_func=lambda e: e.exercise_name)
+        return
+    exercise = selection
     with st.expander("Edit exercise metadata"):
         with st.form("edit_exercise"):
             name = st.text_input("Name", exercise.exercise_name); group = st.text_input("Muscle group", exercise.muscle_group or ""); equipment = st.text_input("Equipment", exercise.equipment or ""); desc = st.text_area("Description", exercise.description or "")
@@ -99,8 +115,8 @@ def exercises_page(session):
     st.write(fmt(state))
     with st.expander("Change exercise state"):
         with st.form("state_change"):
-            weight = st.number_input("Weight (kg)", min_value=0.0, value=float(state.weight) if state else 0.0, step=0.5)
-            reps = st.number_input("Max reps", min_value=1, value=state.max_reps if state else 8)
+            weight = st.number_input("Weight (kg)", min_value=0.0, value=float(state.weight) if state else 0.0, step=2.5, format="%.1f")
+            reps = st.number_input("Max reps", min_value=1, value=state.max_reps if state else 12)
             sets = st.number_input("Sets", min_value=1, value=state.sets if state else 3)
             effective = st.date_input("Effective from", date.today())
             notes = st.text_area("Notes (optional)")
@@ -111,16 +127,59 @@ def exercises_page(session):
 
 def history_page(session):
     st.title("Workout history")
+    all_workouts = workouts(session)
+    st.subheader("Log workout")
+    if all_workouts:
+        selected = st.selectbox("Workout to log", all_workouts, format_func=lambda workout: workout.workout_name)
+        workout_date = st.date_input("Workout date", date.today())
+        items = workout_exercises_for_date(session, selected.workout_id, workout_date)
+        if items:
+            for item in items:
+                st.write(f"**{item.exercise.exercise_name}** — {fmt(state_for_date(session, item.exercise_id, workout_date))}")
+            if st.button("Log workout", type="primary"):
+                flash(lambda: log_workout(session, selected.workout_id, workout_date))
+        else:
+            st.info("This workout has no exercises configured for that date.")
+    else:
+        st.info("Create a workout first.")
+
+    st.subheader("Calendar")
     records = recent_sessions(session, 100)
-    if not records: st.info("No workouts logged yet."); return
-    record = st.selectbox("Workout session", records, format_func=lambda r: f"{r.workout_date:%d %b %Y} — {r.workout.workout_name}")
+    if not records:
+        st.caption("No workouts logged yet.")
+        return
+    month = st.date_input("Month", date.today().replace(day=1), key="history_month")
+    by_day = {}
+    for record in records:
+        if record.workout_date.year == month.year and record.workout_date.month == month.month:
+            by_day.setdefault(record.workout_date, []).append(record)
+    headers = st.columns(7)
+    for column, label in zip(headers, calendar.day_abbr):
+        column.caption(label)
+    for week in calendar.monthcalendar(month.year, month.month):
+        columns = st.columns(7)
+        for column, day in zip(columns, week):
+            if not day:
+                continue
+            day_date = date(month.year, month.month, day)
+            day_records = by_day.get(day_date, [])
+            if column.button(str(day), key=f"calendar_{day_date.isoformat()}", type="primary" if day_records else "secondary"):
+                st.session_state.history_selected_date = day_date
+            if day_records:
+                column.caption(", ".join(record.workout.workout_name for record in day_records))
+    selected_date = st.session_state.get("history_selected_date")
+    dated_records = [record for record in records if record.workout_date == selected_date]
+    if not dated_records:
+        st.caption("Select a workout day to view its details.")
+        return
+    record = st.selectbox("Workout session", dated_records, format_func=lambda item: item.workout.workout_name)
     record, details = session_details(session, record.workout_session_id)
     st.subheader(f"{record.workout.workout_name} — {record.workout_date:%d %B %Y}")
     for exercise, state in details: st.write(f"**{exercise.exercise_name}** — {fmt(state)}")
 
 session = get_session()
 try:
-    page = st.sidebar.radio("Navigate", ["Home", "Log workout", "Workouts", "Exercises", "History"])
-    {"Home": home, "Log workout": log_page, "Workouts": workouts_page, "Exercises": exercises_page, "History": history_page}[page](session)
+    page = st.sidebar.radio("Navigate", ["Home", "Workouts", "Exercises", "History"])
+    {"Home": home, "Workouts": workouts_page, "Exercises": exercises_page, "History": history_page}[page](session)
 finally:
     session.close()

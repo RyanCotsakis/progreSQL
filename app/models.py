@@ -30,18 +30,27 @@ class Workout(TimestampMixin, Base):
     workout_id: Mapped[int] = mapped_column(primary_key=True)
     workout_name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
-    exercises: Mapped[list["WorkoutExercise"]] = relationship(back_populates="workout", cascade="all, delete-orphan", order_by="WorkoutExercise.exercise_order")
+    exercises: Mapped[list["WorkoutExercise"]] = relationship(back_populates="workout", cascade="all, delete-orphan", order_by="WorkoutExercise.effective_from, WorkoutExercise.exercise_order")
     sessions: Mapped[list["WorkoutSession"]] = relationship(back_populates="workout")
 
 
 class WorkoutExercise(Base):
     __tablename__ = "workout_exercise"
-    workout_id: Mapped[int] = mapped_column(ForeignKey("workout.workout_id", ondelete="CASCADE"), primary_key=True)
-    exercise_id: Mapped[int] = mapped_column(ForeignKey("exercise.exercise_id", ondelete="RESTRICT"), primary_key=True)
+    workout_exercise_id: Mapped[int] = mapped_column(primary_key=True)
+    workout_id: Mapped[int] = mapped_column(ForeignKey("workout.workout_id", ondelete="CASCADE"), nullable=False)
+    exercise_id: Mapped[int] = mapped_column(ForeignKey("exercise.exercise_id", ondelete="RESTRICT"), nullable=False)
     exercise_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False)
+    effective_to: Mapped[Optional[date]] = mapped_column(Date)
     workout: Mapped[Workout] = relationship(back_populates="exercises")
     exercise: Mapped[Exercise] = relationship()
-    __table_args__ = (UniqueConstraint("workout_id", "exercise_order", name="uq_workout_exercise_order"), CheckConstraint("exercise_order > 0", name="ck_exercise_order_positive"))
+    __table_args__ = (
+        UniqueConstraint("workout_id", "exercise_id", "effective_from", name="uq_workout_exercise_start"),
+        UniqueConstraint("workout_id", "exercise_order", "effective_from", name="uq_workout_exercise_order_start"),
+        CheckConstraint("exercise_order > 0", name="ck_exercise_order_positive"),
+        CheckConstraint("effective_to IS NULL OR effective_to > effective_from", name="ck_workout_exercise_valid_period"),
+        Index("ix_workout_exercise_period", "workout_id", "effective_from", "effective_to"),
+    )
 
 
 class WorkoutSession(Base):

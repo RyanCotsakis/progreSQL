@@ -9,11 +9,11 @@ SQLite is accessed through SQLAlchemy. Alembic owns the database schema; the app
 | Table | Purpose |
 | --- | --- |
 | `exercise` | Stable exercise identity and metadata. |
-| `workout` / `workout_exercise` | A reusable ordered workout definition. |
+| `workout` / `workout_exercise` | A reusable workout definition with effective-dated exercise membership and order. |
 | `workout_session` | The fact that a workout was performed on a date. |
 | `exercise_settings_history` | Time-bounded weight / max-reps / sets prescriptions. |
 
-Exercise identity is separate from state because its prescription changes over time. Settings use SCD Type 2 periods: adding a state closes the row covering its effective date and inserts a new row. Historical rows are never overwritten. A workout session stores only a workout and date; when it is displayed, the app resolves each exercise's state for that date using `effective_from <= date < effective_to` (or no end date). This means old workouts always show the prescription that applied at the time.
+Exercise identity is separate from state because its prescription changes over time. Settings use SCD Type 2 periods: adding a state closes the row covering its effective date and inserts a new row. Workout exercise membership and ordering use the same date-range approach. A workout session stores only a workout and date; when it is displayed, the app resolves both its exercise list and each exercise's state using `effective_from <= date < effective_to` (or no end date). This means old workouts always show the configuration that applied at the time, while a change made effective on a session's date is reflected in that session.
 
 Future-dated changes are supported: the old state remains applicable until the new state's effective date.
 
@@ -33,6 +33,16 @@ Run the test suite with:
 
 ```powershell
 uv run pytest
+```
+
+## Reset the local database
+
+To discard all local workout data and recreate an empty database from the
+migrations, run:
+
+```powershell
+Remove-Item .\gym.db
+uv run alembic upgrade head
 ```
 
 ## Everyday workflow

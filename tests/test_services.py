@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy.orm import sessionmaker
 
 from app.db import Base, make_engine
-from app.services import (ValidationError, add_exercise_to_workout, create_exercise, create_workout, log_workout, session_details, set_exercise_state, state_for_date)
+from app.services import (ValidationError, add_exercise_to_workout, create_exercise, create_workout, log_workout, session_details, set_exercise_state, set_workout_exercises, state_for_date, workout_exercises_for_date)
 
 
 @pytest.fixture
@@ -82,3 +82,16 @@ def test_prevents_duplicate_session_same_workout_and_date(session):
     log_workout(session, push.workout_id, date(2026, 1, 15))
     with pytest.raises(ValidationError):
         log_workout(session, push.workout_id, date(2026, 1, 15))
+
+
+def test_workout_composition_is_effective_dated_and_same_day_edits_apply_to_session(session):
+    bench, push = setup_push(session)
+    squat = create_exercise(session, "Squat", "Legs", "Barbell")
+    january_session = log_workout(session, push.workout_id, date(2026, 1, 15))
+
+    set_workout_exercises(session, push, [squat.exercise_id, bench.exercise_id], date(2026, 1, 15))
+
+    assert [item.exercise.exercise_name for item in workout_exercises_for_date(session, push.workout_id, date(2026, 1, 14))] == ["Bench Press"]
+    assert [item.exercise.exercise_name for item in workout_exercises_for_date(session, push.workout_id, date(2026, 1, 15))] == ["Squat", "Bench Press"]
+    _, details = session_details(session, january_session.workout_session_id)
+    assert [exercise.exercise_name for exercise, _ in details] == ["Squat", "Bench Press"]

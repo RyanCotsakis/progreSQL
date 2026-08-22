@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import Select, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
@@ -54,36 +54,69 @@ def update_workout(session: Session, workout: Workout, name: str, description: s
         raise ValidationError("A workout with that name already exists.") from exc
 
 
+def workout_exercises_for_date(session: Session, workout_id: int, on_date: date) -> list[WorkoutExercise]:
+    """Return the workout composition in force on a date, in display order."""
+    return list(session.scalars(select(WorkoutExercise).options(joinedload(WorkoutExercise.exercise)).where(
+        WorkoutExercise.workout_id == workout_id,
+        WorkoutExercise.effective_from <= on_date,
+        (WorkoutExercise.effective_to.is_(None)) | (WorkoutExercise.effective_to > on_date),
+    ).order_by(WorkoutExercise.exercise_order)))
+
+
+def set_workout_exercises(session: Session, workout: Workout, exercise_ids: list[int], effective_from: date) -> None:
+    """Replace a workout's complete exercise/order snapshot from a chosen date.
+
+    A session resolves this snapshot by its workout date. Replacing a snapshot on
+    the same date deliberately updates that day's view, including any session
+    already logged for the day.
+    """
+    if len(exercise_ids) != len(set(exercise_ids)):
+        raise ValidationError("Select each exercise only once.")
+    current = workout_exercises_for_date(session, workout.workout_id, effective_from)
+    next_change = session.scalar(select(WorkoutExercise.effective_from).where(
+        WorkoutExercise.workout_id == workout.workout_id,
+        WorkoutExercise.effective_from > effective_from,
+    ).order_by(WorkoutExercise.effective_from))
+    for item in current:
+        if item.effective_from == effective_from:
+            session.delete(item)
+        else:
+            item.effective_to = effective_from
+    session.flush()
+    for order, exercise_id in enumerate(exercise_ids, start=1):
+        session.add(WorkoutExercise(
+            workout_id=workout.workout_id,
+            exercise_id=exercise_id,
+            exercise_order=order,
+            effective_from=effective_from,
+            effective_to=next_change,
+        ))
+    session.commit()
+    session.expire(workout, ["exercises"])
+
+
 def add_exercise_to_workout(session: Session, workout: Workout, exercise: Exercise) -> None:
-    if any(item.exercise_id == exercise.exercise_id for item in workout.exercises):
+    """Compatibility helper preserving the original always-applicable behavior."""
+    baseline = date(1900, 1, 1)
+    items = workout_exercises_for_date(session, workout.workout_id, baseline)
+    if any(item.exercise_id == exercise.exercise_id for item in items):
         raise ValidationError("That exercise is already in this workout.")
-    workout.exercises.append(WorkoutExercise(exercise=exercise, exercise_order=len(workout.exercises) + 1))
-    session.commit()
+    set_workout_exercises(session, workout, [item.exercise_id for item in items] + [exercise.exercise_id], baseline)
 
 
-def remove_exercise_from_workout(session: Session, workout: Workout, exercise_id: int) -> None:
-    item = next((row for row in workout.exercises if row.exercise_id == exercise_id), None)
-    if not item:
-        return
-    workout.exercises.remove(item)
-    for order, row in enumerate(workout.exercises, start=1):
-        row.exercise_order = order
-    session.commit()
+def remove_exercise_from_workout(session: Session, workout: Workout, exercise_id: int, effective_from: date | None = None) -> None:
+    on_date = effective_from or date.today()
+    set_workout_exercises(session, workout, [item.exercise_id for item in workout_exercises_for_date(session, workout.workout_id, on_date) if item.exercise_id != exercise_id], on_date)
 
 
-def move_workout_exercise(session: Session, workout: Workout, exercise_id: int, direction: int) -> None:
-    items = sorted(workout.exercises, key=lambda row: row.exercise_order)
-    index = next((i for i, row in enumerate(items) if row.exercise_id == exercise_id), None)
+def move_workout_exercise(session: Session, workout: Workout, exercise_id: int, direction: int, effective_from: date | None = None) -> None:
+    on_date = effective_from or date.today()
+    items = workout_exercises_for_date(session, workout.workout_id, on_date)
+    index = next((i for i, item in enumerate(items) if item.exercise_id == exercise_id), None)
     if index is None or not 0 <= index + direction < len(items):
         return
     items[index], items[index + direction] = items[index + direction], items[index]
-    # Two phase values avoid the uniqueness constraint while swapping.
-    for i, row in enumerate(items, start=1001):
-        row.exercise_order = i
-    session.flush()
-    for i, row in enumerate(items, start=1):
-        row.exercise_order = i
-    session.commit()
+    set_workout_exercises(session, workout, [item.exercise_id for item in items], on_date)
 
 
 def state_for_date(session: Session, exercise_id: int, on_date: date) -> ExerciseSettingsHistory | None:
@@ -141,7 +174,7 @@ def log_workout(session: Session, workout_id: int, workout_date: date, notes: st
 
 
 def workouts(session: Session) -> list[Workout]:
-    return list(session.scalars(select(Workout).options(joinedload(Workout.exercises).joinedload(WorkoutExercise.exercise)).order_by(Workout.workout_name)).unique())
+    return list(session.scalars(select(Workout).order_by(Workout.workout_name)))
 
 
 def exercises(session: Session) -> list[Exercise]:
@@ -153,8 +186,8 @@ def recent_sessions(session: Session, limit: int = 12) -> list[WorkoutSession]:
 
 
 def session_details(session: Session, workout_session_id: int) -> tuple[WorkoutSession, list[tuple[Exercise, ExerciseSettingsHistory | None]]]:
-    record = session.scalar(select(WorkoutSession).options(joinedload(WorkoutSession.workout).joinedload(Workout.exercises).joinedload(WorkoutExercise.exercise)).where(WorkoutSession.workout_session_id == workout_session_id))
+    record = session.scalar(select(WorkoutSession).options(joinedload(WorkoutSession.workout)).where(WorkoutSession.workout_session_id == workout_session_id))
     if not record:
         raise ValidationError("Workout session not found.")
-    details = [(item.exercise, state_for_date(session, item.exercise_id, record.workout_date)) for item in sorted(record.workout.exercises, key=lambda item: item.exercise_order)]
+    details = [(item.exercise, state_for_date(session, item.exercise_id, record.workout_date)) for item in workout_exercises_for_date(session, record.workout_id, record.workout_date)]
     return record, details
