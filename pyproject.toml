@@ -1,0 +1,18 @@
+[project]
+name = "gym-tracker"
+version = "0.1.0"
+description = "A lightweight personal gym tracker with auditable exercise settings history."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "streamlit>=1.38,<2",
+  "SQLAlchemy>=2.0,<3",
+  "alembic>=1.13,<2",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<9"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

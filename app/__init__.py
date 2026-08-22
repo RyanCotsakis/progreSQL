@@ -1,0 +1,1 @@
+"""Gym tracker application package."""
