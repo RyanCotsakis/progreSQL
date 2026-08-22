@@ -1,4 +1,4 @@
-# Gym Tracker
+# ProgreSQL 💪
 
 A deliberately small, single-user Streamlit app for logging that you completed a workout and keeping an auditable history of each exercise's prescribed weight, maximum reps, and sets. It does not track individual sets, actual repetitions, or RPE.
 
