@@ -1,7 +1,7 @@
 [project]
-name = "gym-tracker"
+name = "progresql"
 version = "0.1.0"
-description = "A lightweight personal gym tracker with auditable exercise settings history."
+description = "ProgreSQL: a lightweight workout tracker with auditable exercise settings history."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

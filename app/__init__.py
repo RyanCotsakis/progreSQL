@@ -1,1 +1,1 @@
-"""Gym tracker application package."""
+"""ProgreSQL 💪 application package."""

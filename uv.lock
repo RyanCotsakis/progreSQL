@@ -315,7 +315,7 @@ wheels = [
 ]
 
 [[package]]
-name = "gym-tracker"
+name = "progresql"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
