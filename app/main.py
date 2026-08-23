@@ -24,7 +24,7 @@ from app.services import (
     workout_exercises_for_date, workouts,
 )
 
-st.set_page_config(page_title="ProgreSQL 💪", page_icon="💪", layout="wide")
+st.set_page_config(page_title="ProgreSQL", page_icon="💪", layout="wide")
 
 
 def flash(action, message="Saved."):
@@ -270,7 +270,7 @@ def history_page(session):
         if record.workout_date.year == month.year and record.workout_date.month == month.month:
             by_day.setdefault(record.workout_date, []).append(record)
     st.subheader("Select workout date")
-    st.markdown("<style>.st-key-calendar_grid {max-width: 75%; margin-inline: auto;} .st-key-calendar_grid [data-testid='stHorizontalBlock'] {gap: 0.25rem;} @media (max-width: 800px) {.st-key-calendar_grid {max-width: 100%;}}</style>", unsafe_allow_html=True)
+    st.markdown("<style>.st-key-calendar_grid {max-width: 75%; margin-inline: auto; gap: 0.25rem !important;} .st-key-calendar_grid [data-testid='stVerticalBlock'] {gap: 0.25rem !important;} .st-key-calendar_grid [data-testid='stHorizontalBlock'] {gap: 0.25rem;} .st-key-calendar_grid [class*='st-key-calendar_day_'] [data-testid='stVerticalBlock'] {gap: 0.15rem !important;} @media (max-width: 800px) {.st-key-calendar_grid {max-width: 100%;}}</style>", unsafe_allow_html=True)
     with st.container(key="calendar_grid"):
         headers = st.columns(7)
         for column, label in zip(headers, calendar.day_abbr):
@@ -288,7 +288,7 @@ def history_page(session):
                 with column:
                     # A fixed-height cell keeps the entire calendar grid aligned,
                     # while leaving room to show the logged workout names.
-                    with st.container(height=132, border=False, key=container_key):
+                    with st.container(height=86, border=False, key=container_key):
                         if st.button(str(day_number), key=f"calendar_{day_date.isoformat()}", type="secondary"):
                             st.session_state.history_selected_date = day_date
                             st.rerun()
