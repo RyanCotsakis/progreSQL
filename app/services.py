@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
@@ -216,6 +216,11 @@ def exercises(session: Session) -> list[Exercise]:
 
 def recent_sessions(session: Session, limit: int = 12) -> list[WorkoutSession]:
     return list(session.scalars(select(WorkoutSession).options(joinedload(WorkoutSession.workout)).order_by(WorkoutSession.workout_date.desc(), WorkoutSession.workout_session_id.desc()).limit(limit)))
+
+
+def last_recorded_workout_date(session: Session) -> date | None:
+    """Return the date of the latest workout session, if one has been logged."""
+    return session.scalar(select(func.max(WorkoutSession.workout_date)))
 
 
 def session_details(session: Session, workout_session_id: int) -> tuple[WorkoutSession, list[tuple[Exercise, ExerciseSettingsHistory | None]]]:

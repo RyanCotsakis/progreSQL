@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy.orm import sessionmaker
 
 from app.db import Base, make_engine
-from app.services import (ValidationError, add_exercise_to_workout, create_exercise, create_exercise_with_initial_state, create_workout, deactivate_exercise, deactivate_workout, exercises, log_workout, recent_sessions, session_details, set_exercise_state, set_workout_exercises, state_for_date, workout_exercises_for_date, workouts)
+from app.services import (ValidationError, add_exercise_to_workout, create_exercise, create_exercise_with_initial_state, create_workout, deactivate_exercise, deactivate_workout, exercises, last_recorded_workout_date, log_workout, recent_sessions, session_details, set_exercise_state, set_workout_exercises, state_for_date, workout_exercises_for_date, workouts)
 
 
 @pytest.fixture
@@ -29,6 +29,15 @@ def test_create_exercise_workout_and_session(session):
     assert push.exercises[0].exercise_id == bench.exercise_id
     record = log_workout(session, push.workout_id, date(2026, 1, 15))
     assert record.workout_date == date(2026, 1, 15)
+
+
+def test_last_recorded_workout_date(session):
+    assert last_recorded_workout_date(session) is None
+    _, push = setup_push(session)
+    log_workout(session, push.workout_id, date(2026, 1, 10))
+    log_workout(session, push.workout_id, date(2026, 1, 12))
+
+    assert last_recorded_workout_date(session) == date(2026, 1, 12)
 
 
 def test_create_exercise_with_initial_state(session):

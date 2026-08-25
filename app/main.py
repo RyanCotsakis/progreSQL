@@ -19,7 +19,7 @@ from app.models import ExerciseSettingsHistory
 from app.services import (
     ValidationError, create_exercise_with_initial_state, create_workout,
     deactivate_exercise, deactivate_workout, exercises, log_workout,
-    recent_sessions, session_details, set_exercise_state,
+    last_recorded_workout_date, recent_sessions, session_details, set_exercise_state,
     set_workout_exercises, state_for_date, update_exercise, update_workout,
     workout_exercises_for_date, workouts,
 )
@@ -221,6 +221,49 @@ def exercise_edit_page(session):
         st.dataframe([{"Effective from": row.effective_from, "Effective to": row.effective_to or "—", "Weight (kg)": float(row.weight), "Max reps": row.max_reps, "Sets": row.sets} for row in history], hide_index=True, use_container_width=True)
     else:
         st.caption("No state changes yet.")
+    last_session_date = last_recorded_workout_date(session)
+    if history and last_session_date and last_session_date >= history[0].effective_from:
+        chart_history = [row for row in history if row.effective_from <= last_session_date]
+        if chart_history:
+            chart_rows = [
+                # A timezone-free midnight keeps Vega from converting a date
+                # into a local time label (for example, "6 AM").
+                {"Date": f"{row.effective_from.isoformat()}T00:00:00", "Weight (kg)": float(row.weight)}
+                for row in chart_history
+            ]
+            # The final point extends the last prescription through the latest
+            # recorded session, rather than leaving the chart at its last change.
+            if chart_rows[-1]["Date"] != f"{last_session_date.isoformat()}T00:00:00":
+                chart_rows.append({"Date": f"{last_session_date.isoformat()}T00:00:00", "Weight (kg)": chart_rows[-1]["Weight (kg)"]})
+            highest_weight = max(row["Weight (kg)"] for row in chart_rows)
+            chart_start = history[0].effective_from
+            span_days = (last_session_date - chart_start).days
+            tick_count = min(10, span_days + 1)
+            tick_offsets = (
+                [0]
+                if tick_count == 1
+                else sorted({round(index * span_days / (tick_count - 1)) for index in range(tick_count)})
+            )
+            # Supply the ticks explicitly: Vega otherwise may choose multiple
+            # time-based ticks which format to the same calendar date.
+            date_ticks = [f"{(chart_start + timedelta(days=offset)).isoformat()}T00:00:00" for offset in tick_offsets]
+            st.subheader("Weight progression")
+            st.vega_lite_chart(
+                chart_rows,
+                {
+                    "mark": {"type": "line", "interpolate": "step-after", "point": True},
+                    "encoding": {
+                        "x": {
+                            "field": "Date", "type": "temporal", "title": "Date",
+                            "axis": {"format": "%d %b", "values": date_ticks, "labelOverlap": "greedy"},
+                        },
+                        "y": {"field": "Weight (kg)", "type": "quantitative", "title": "Weight (kg)", "scale": {"domain": [0, highest_weight]}},
+                    },
+                },
+                use_container_width=True,
+            )
+    elif history:
+        st.caption("Weight progression will appear after a workout session is logged for this period.")
     with st.expander("Edit exercise metadata", expanded=False):
         with st.form("edit_exercise"):
             name, group = st.text_input("Name", exercise.exercise_name), st.text_input("Muscle group", exercise.muscle_group or "")
@@ -294,6 +337,13 @@ def history_page(session):
                             st.rerun()
                         if day_records:
                             st.caption(", ".join(record.workout.workout_name for record in day_records))
+    logged = [record for record in records if record.workout_date == selected_date]
+    if logged:
+        st.subheader(f"Already logged on {selected_date:%d %B %Y}")
+        for record in logged:
+            record, details = session_details(session, record.workout_session_id)
+            st.markdown(f"#### {record.workout.workout_name}")
+            st.dataframe([{"Exercise": exercise.exercise_name, "Weight (kg)": float(state.weight) if state else "—", "Max reps": state.max_reps if state else "—", "Sets": state.sets if state else "—"} for exercise, state in details], hide_index=True, use_container_width=True)
     st.subheader(f"Log a workout on {selected_date:%A, %d %B %Y}")
     all_workouts = workouts(session)
     if all_workouts:
@@ -308,15 +358,6 @@ def history_page(session):
             st.info("This workout has no exercises configured for the selected date.")
     else:
         st.info("Create a workout first.")
-    logged = [record for record in records if record.workout_date == selected_date]
-    if logged:
-        st.subheader(f"Already logged on {selected_date:%d %B %Y}")
-        for record in logged:
-            record, details = session_details(session, record.workout_session_id)
-            st.markdown(f"#### {record.workout.workout_name}")
-            st.dataframe([{"Exercise": exercise.exercise_name, "Weight (kg)": float(state.weight) if state else "—", "Max reps": state.max_reps if state else "—", "Sets": state.sets if state else "—"} for exercise, state in details], hide_index=True, use_container_width=True)
-
-
 def _admin_value(column, value):
     if value == "": return None
     try: value_type = column.type.python_type
