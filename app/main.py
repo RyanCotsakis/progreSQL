@@ -23,7 +23,8 @@ from app.models import ExerciseSettingsHistory
 from app.services import (
     ValidationError, create_exercise_with_initial_state, create_workout,
     deactivate_exercise, deactivate_workout, exercises, log_workout,
-    last_recorded_workout_date, recent_sessions, session_details, set_exercise_state,
+    last_recorded_workout_date, recent_sessions, session_details, sessions_on_date, set_exercise_state,
+    states_for_date,
     set_workout_exercises, state_for_date, update_exercise, update_workout,
     workout_exercises_for_date, workouts,
 )
@@ -82,9 +83,10 @@ def flash(action, message="Saved."):
 
 
 def prescription_table(session, items, on_date):
+    states = states_for_date(session, [item.exercise_id for item in items], on_date)
     rows = []
     for item in items:
-        state = state_for_date(session, item.exercise_id, on_date)
+        state = states.get(item.exercise_id)
         rows.append({"Exercise": item.exercise.exercise_name, "Weight (kg)": float(state.weight) if state else "—", "Max reps": state.max_reps if state else "—", "Sets": state.sets if state else "—"})
     st.dataframe(rows, hide_index=True, width="stretch")
 
@@ -137,9 +139,10 @@ def library_page(session):
         st.rerun()
     st.subheader("View / edit exercises")
     if all_exercises:
+        current_states = states_for_date(session, [exercise.exercise_id for exercise in all_exercises], date.today())
         rows = []
         for exercise in all_exercises:
-            state = state_for_date(session, exercise.exercise_id, date.today())
+            state = current_states.get(exercise.exercise_id)
             rows.append({"Exercise": exercise.exercise_name, "Muscle group": exercise.muscle_group or "—", "Equipment": exercise.equipment or "—", "Description": exercise.description or "—", "Weight (kg)": float(state.weight) if state else "—", "Max reps": state.max_reps if state else "—", "Sets": state.sets if state else "—"})
         selected = selectable_table(rows, "exercise_library_table")
         if selected is not None:
@@ -333,90 +336,54 @@ def exercise_edit_page(session):
 
 def history_page(session):
     st.title("Log workouts")
-    records = recent_sessions(session, 100)
     if "history_selected_date" not in st.session_state:
         st.session_state.history_selected_date = date.today()
-    calendar_events = [
-        {
-            "id": "selected-workout-date",
-            "start": st.session_state.history_selected_date.isoformat(),
-            "allDay": True,
-            "display": "background",
-            "backgroundColor": "rgba(25, 118, 210, 0.18)",
-        },
-        *[
-        {
-            "id": str(record.workout_session_id),
-            "title": record.workout.workout_name,
-            "start": record.workout_date.isoformat(),
-            "allDay": True,
-            "backgroundColor": "#1976d2",
-            "borderColor": "#1976d2",
-            "extendedProps": {"workout_session_id": record.workout_session_id},
-        }
-        for record in records
-        ],
-    ]
-    calendar_state = calendar(
-        events=calendar_events,
-        options={
-            "initialView": "dayGridMonth",
-            "initialDate": st.session_state.history_selected_date.isoformat(),
-            "headerToolbar": {"left": "prev,next today", "center": "title", "right": ""},
-            "firstDay": 1,
-            "fixedWeekCount": False,
-            "showNonCurrentDates": False,
-            "navLinks": False,
-            "editable": False,
-            "selectable": False,
-            # Keep date-only callbacks independent of the viewer's timezone.
-            "timeZone": "UTC",
-            "height": "auto",
-        },
-        custom_css="""
-            .fc { font-family: inherit; }
-            .fc .fc-toolbar { gap: 0.5rem; flex-wrap: wrap; }
-            .fc .fc-toolbar-title { font-size: clamp(1.1rem, 4vw, 1.5rem); }
-            .fc .fc-button { text-transform: capitalize; }
-            .fc .fc-daygrid-event { border-radius: 0.35rem; padding: 0.15rem 0.3rem; cursor: pointer; }
-            .fc .fc-daygrid-day { cursor: pointer; }
-            @media (max-width: 640px) {
-                .fc .fc-toolbar { justify-content: center; }
-                .fc .fc-toolbar-chunk { display: flex; justify-content: center; }
-                .fc .fc-col-header-cell-cushion { font-size: 0.72rem; }
-                .fc .fc-daygrid-day-number { padding: 0.3rem; }
-                .fc .fc-daygrid-event { font-size: 0.72rem; }
+    if st.toggle("Show workout calendar", value=False, help="The date picker is faster. Open the calendar only when you need to browse previous workouts."):
+        records = recent_sessions(session, 100)
+        calendar_events = [
+            {
+                "id": str(record.workout_session_id),
+                "title": record.workout.workout_name,
+                "start": record.workout_date.isoformat(),
+                "allDay": True,
+                "backgroundColor": "#1976d2",
+                "borderColor": "#1976d2",
+                "extendedProps": {"workout_session_id": record.workout_session_id},
             }
-        """,
-        callbacks=["dateClick", "eventClick"],
-        key="workout_calendar",
-    )
-    callback = calendar_state.get("callback") if calendar_state else None
-    callback_id = None
-    if callback == "dateClick":
-        callback_id = f"dateClick:{calendar_state['dateClick']['date']}"
-    elif callback == "eventClick":
-        callback_id = f"eventClick:{calendar_state['eventClick']['event']['id']}"
+            for record in records
+        ]
+        calendar_state = calendar(
+            events=calendar_events,
+            options={
+                "initialView": "dayGridMonth",
+                "initialDate": st.session_state.history_selected_date.isoformat(),
+                "headerToolbar": {"left": "prev,next today", "center": "title", "right": ""},
+                "firstDay": 1,
+                "fixedWeekCount": False,
+                "showNonCurrentDates": False,
+                "navLinks": False,
+                "editable": False,
+                "selectable": False,
+                "timeZone": "UTC",
+                "height": "auto",
+            },
+            callbacks=["dateClick", "eventClick"],
+            key="workout_calendar",
+        )
+        callback = calendar_state.get("callback") if calendar_state else None
+        if callback == "dateClick":
+            st.session_state.history_selected_date = date.fromisoformat(calendar_state["dateClick"]["date"][:10])
+            st.session_state.pop("history_selected_session_id", None)
+        elif callback == "eventClick":
+            event = calendar_state["eventClick"]["event"]
+            st.session_state.history_selected_date = date.fromisoformat(event["start"][:10])
+            st.session_state.history_selected_session_id = int(event["extendedProps"]["workout_session_id"])
 
-    # Streamlit components report their last callback value on the next run.
-    # Refresh once to send the new background highlight, then consume that same
-    # callback on the following run without remounting the calendar widget.
-    if callback_id and callback_id == st.session_state.pop("history_calendar_callback_to_ignore", None):
-        callback = None
-
-    if callback == "dateClick":
-        st.session_state.history_selected_date = date.fromisoformat(calendar_state["dateClick"]["date"][:10])
+    selected_date = st.date_input("Workout date", st.session_state.history_selected_date)
+    if selected_date != st.session_state.history_selected_date:
+        st.session_state.history_selected_date = selected_date
         st.session_state.pop("history_selected_session_id", None)
-        st.session_state.history_calendar_callback_to_ignore = callback_id
-        st.rerun()
-    if callback == "eventClick":
-        event = calendar_state["eventClick"]["event"]
-        st.session_state.history_selected_date = date.fromisoformat(event["start"][:10])
-        st.session_state.history_selected_session_id = int(event["extendedProps"]["workout_session_id"])
-        st.session_state.history_calendar_callback_to_ignore = callback_id
-        st.rerun()
-    selected_date = st.session_state.history_selected_date
-    logged = [record for record in records if record.workout_date == selected_date]
+    logged = sessions_on_date(session, selected_date)
     selected_session_id = st.session_state.get("history_selected_session_id")
     if selected_session_id and not any(record.workout_session_id == selected_session_id for record in logged):
         st.session_state.pop("history_selected_session_id", None)
@@ -506,10 +473,12 @@ try:
     if "app_view" not in st.session_state: st.session_state.app_view = "library"
     if message := st.session_state.pop("saved_message", None):
         st.toast(message, icon="✅", duration="short")
-    log_tab, library_tab, admin_tab = st.tabs(["Log workouts", "Workouts & exercises", "Admin"])
-    with library_tab:
+    section = st.radio("Navigate", ["Log workouts", "Workouts & exercises", "Admin"], horizontal=True, label_visibility="collapsed")
+    if section == "Workouts & exercises":
         {"library": library_page, "workout_create": workout_create_page, "workout_edit": workout_edit_page, "exercise_create": exercise_create_page, "exercise_edit": exercise_edit_page}[st.session_state.app_view](session)
-    with log_tab: history_page(session)
-    with admin_tab: admin_page(session)
+    elif section == "Log workouts":
+        history_page(session)
+    else:
+        admin_page(session)
 finally:
     session.close()

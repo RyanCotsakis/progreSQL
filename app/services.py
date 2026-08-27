@@ -160,6 +160,18 @@ def state_for_date(session: Session, exercise_id: int, on_date: date) -> Exercis
     ).order_by(ExerciseSettingsHistory.effective_from.desc()))
 
 
+def states_for_date(session: Session, exercise_ids: list[int], on_date: date) -> dict[int, ExerciseSettingsHistory]:
+    """Return the effective state for each requested exercise in one query."""
+    if not exercise_ids:
+        return {}
+    states = session.scalars(select(ExerciseSettingsHistory).where(
+        ExerciseSettingsHistory.exercise_id.in_(exercise_ids),
+        ExerciseSettingsHistory.effective_from <= on_date,
+        (ExerciseSettingsHistory.effective_to.is_(None)) | (ExerciseSettingsHistory.effective_to > on_date),
+    )).all()
+    return {state.exercise_id: state for state in states}
+
+
 def set_exercise_state(session: Session, exercise_id: int, effective_from: date, weight: Decimal | float | str, max_reps: int, sets: int, notes: str | None = None) -> ExerciseSettingsHistory:
     """Insert a state change, splitting the period that covers its start date.
 
@@ -218,6 +230,12 @@ def recent_sessions(session: Session, limit: int = 12) -> list[WorkoutSession]:
     return list(session.scalars(select(WorkoutSession).options(joinedload(WorkoutSession.workout)).order_by(WorkoutSession.workout_date.desc(), WorkoutSession.workout_session_id.desc()).limit(limit)))
 
 
+def sessions_on_date(session: Session, on_date: date) -> list[WorkoutSession]:
+    return list(session.scalars(select(WorkoutSession).options(joinedload(WorkoutSession.workout)).where(
+        WorkoutSession.workout_date == on_date,
+    ).order_by(WorkoutSession.workout_session_id)))
+
+
 def last_recorded_workout_date(session: Session) -> date | None:
     """Return the date of the latest workout session, if one has been logged."""
     return session.scalar(select(func.max(WorkoutSession.workout_date)))
@@ -227,5 +245,7 @@ def session_details(session: Session, workout_session_id: int) -> tuple[WorkoutS
     record = session.scalar(select(WorkoutSession).options(joinedload(WorkoutSession.workout)).where(WorkoutSession.workout_session_id == workout_session_id))
     if not record:
         raise ValidationError("Workout session not found.")
-    details = [(item.exercise, state_for_date(session, item.exercise_id, record.workout_date)) for item in workout_exercises_for_date(session, record.workout_id, record.workout_date)]
+    items = workout_exercises_for_date(session, record.workout_id, record.workout_date)
+    states = states_for_date(session, [item.exercise_id for item in items], record.workout_date)
+    details = [(item.exercise, states.get(item.exercise_id)) for item in items]
     return record, details
