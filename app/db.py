@@ -31,5 +31,19 @@ engine = make_engine()
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
 
 
+def configure_database(database_url: str) -> None:
+    """Point the application at a database before opening any sessions.
+
+    Production supplies this URL through Streamlit secrets. Keeping SQLite as
+    the default means local development and the test suite need no secrets.
+    """
+    global engine, SessionLocal
+    if database_url == str(engine.url):
+        return
+    engine.dispose()
+    engine = make_engine(database_url)
+    SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+
+
 def get_session() -> Session:
     return SessionLocal()

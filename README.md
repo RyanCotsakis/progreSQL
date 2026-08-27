@@ -6,6 +6,28 @@ A deliberately small, single-user Streamlit app for logging that you completed a
 
 SQLite is accessed through SQLAlchemy. Alembic owns the database schema; the application never calls `create_all` at runtime. The small service layer in `app/services.py` owns all state changes and transactions.
 
+## Public cloud deployment
+
+The deployed app uses a private username, Argon2 password hash, and TOTP code
+from Microsoft Authenticator. It uses hosted PostgreSQL instead of the
+ephemeral filesystem on Streamlit Community Cloud. See
+`.streamlit/secrets.toml.example` for the required secrets; the real secrets
+file is ignored by Git.
+
+Before deploying:
+
+1. Create a PostgreSQL database and save its SQLAlchemy URL as `database_url`.
+2. Run `uv run python scripts/setup_local_auth.py`, scan the generated QR code
+   with Microsoft Authenticator, and paste the printed secrets into your local
+   `.streamlit/secrets.toml` file.
+3. Put the database URL and three generated authentication secrets into
+   Streamlit Community Cloud's Secrets settings.
+4. Run the migrations against PostgreSQL once before first use (PowerShell):
+   `$env:DATABASE_URL = 'postgresql+psycopg://...'; uv run alembic upgrade head`
+
+Do not store `gym.db` in the public repository or rely on it for deployed
+data. Keep periodic PostgreSQL backups from your database provider.
+
 | Table | Purpose |
 | --- | --- |
 | `exercise` | Stable exercise identity and metadata. |

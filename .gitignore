@@ -4,3 +4,5 @@ __pycache__/
 .pytest_cache/
 gym.db
 *.db-journal
+.streamlit/secrets.toml
+.streamlit/authenticator-setup.png

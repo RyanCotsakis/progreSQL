@@ -6,15 +6,19 @@ from decimal import Decimal
 from pathlib import Path
 import sys
 
+import pyotp
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import streamlit as st
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHashError, VerificationError
 from streamlit_calendar import calendar
 from sqlalchemy import MetaData, Table, inspect, select
 
-from app.db import get_session
+from app.db import DEFAULT_DATABASE_URL, configure_database, get_session
 from app.models import ExerciseSettingsHistory
 from app.services import (
     ValidationError, create_exercise_with_initial_state, create_workout,
@@ -25,6 +29,48 @@ from app.services import (
 )
 
 st.set_page_config(page_title="ProgreSQL", page_icon="💪", layout="wide")
+
+
+def require_authorized_user() -> None:
+    """Protect this single-user app with a password and authenticator code."""
+    required_secrets = ("auth_username", "auth_password_hash", "auth_totp_secret")
+    missing = [name for name in required_secrets if not st.secrets.get(name)]
+    if missing:
+        st.error("Authentication has not been configured. Run scripts/setup_local_auth.py locally.")
+        st.stop()
+
+    if st.session_state.get("authenticated"):
+        st.sidebar.caption(f"Signed in as {st.secrets.auth_username}")
+        if st.sidebar.button("Sign out"):
+            st.session_state.clear()
+            st.rerun()
+        return
+
+    st.title("ProgreSQL")
+    st.caption("Sign in with your password and Microsoft Authenticator code.")
+    with st.form("login"):
+        username = st.text_input("Username", autocomplete="username")
+        password = st.text_input("Password", type="password", autocomplete="current-password")
+        totp_code = st.text_input("Authenticator code", max_chars=6, autocomplete="one-time-code")
+        submitted = st.form_submit_button("Sign in", type="primary")
+
+    if submitted:
+        password_hasher = PasswordHasher()
+        try:
+            password_ok = password_hasher.verify(st.secrets.auth_password_hash, password)
+        except (InvalidHashError, VerificationError):
+            password_ok = False
+        username_ok = username.casefold() == str(st.secrets.auth_username).casefold()
+        totp_ok = pyotp.TOTP(st.secrets.auth_totp_secret).verify(totp_code, valid_window=1)
+        if username_ok and password_ok and totp_ok:
+            st.session_state.authenticated = True
+            st.rerun()
+        st.error("Invalid username, password, or authenticator code.")
+    st.stop()
+
+
+require_authorized_user()
+configure_database(st.secrets.get("database_url", DEFAULT_DATABASE_URL))
 
 
 def flash(action, message="Saved."):
