@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import calendar
 import json
 from datetime import date, timedelta
 from decimal import Decimal
@@ -12,6 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import streamlit as st
+from streamlit_calendar import calendar
 from sqlalchemy import MetaData, Table, inspect, select
 
 from app.db import get_session
@@ -40,7 +40,7 @@ def prescription_table(session, items, on_date):
     for item in items:
         state = state_for_date(session, item.exercise_id, on_date)
         rows.append({"Exercise": item.exercise.exercise_name, "Weight (kg)": float(state.weight) if state else "—", "Max reps": state.max_reps if state else "—", "Sets": state.sets if state else "—"})
-    st.dataframe(rows, hide_index=True, use_container_width=True)
+    st.dataframe(rows, hide_index=True, width="stretch")
 
 
 def back_to_library():
@@ -60,7 +60,7 @@ def reset_workout_draft():
 
 
 def selectable_table(rows, key):
-    event = st.dataframe(rows, hide_index=True, use_container_width=True, key=key, on_select="rerun", selection_mode="single-row")
+    event = st.dataframe(rows, hide_index=True, width="stretch", key=key, on_select="rerun", selection_mode="single-row")
     selected = event.selection.rows
     return selected[0] if selected else None
 
@@ -108,7 +108,7 @@ def library_page(session):
     st.subheader("Recent workout sessions")
     sessions = recent_sessions(session, 12)
     if sessions:
-        st.dataframe([{"Date": s.workout_date, "Workout": s.workout.workout_name} for s in sessions], hide_index=True, use_container_width=True)
+        st.dataframe([{"Date": s.workout_date, "Workout": s.workout.workout_name} for s in sessions], hide_index=True, width="stretch")
     else:
         st.caption("No workouts logged yet.")
 
@@ -218,7 +218,7 @@ def exercise_edit_page(session):
     st.subheader("State history")
     history = session.scalars(select(ExerciseSettingsHistory).where(ExerciseSettingsHistory.exercise_id == exercise.exercise_id).order_by(ExerciseSettingsHistory.effective_from)).all()
     if history:
-        st.dataframe([{"Effective from": row.effective_from, "Effective to": row.effective_to or "—", "Weight (kg)": float(row.weight), "Max reps": row.max_reps, "Sets": row.sets} for row in history], hide_index=True, use_container_width=True)
+        st.dataframe([{"Effective from": row.effective_from, "Effective to": row.effective_to or "—", "Weight (kg)": float(row.weight), "Max reps": row.max_reps, "Sets": row.sets} for row in history], hide_index=True, width="stretch")
     else:
         st.caption("No state changes yet.")
     last_session_date = last_recorded_workout_date(session)
@@ -260,7 +260,7 @@ def exercise_edit_page(session):
                         "y": {"field": "Weight (kg)", "type": "quantitative", "title": "Weight (kg)", "scale": {"domain": [0, highest_weight]}},
                     },
                 },
-                use_container_width=True,
+                width="stretch",
             )
     elif history:
         st.caption("Weight progression will appear after a workout session is logged for this period.")
@@ -290,60 +290,101 @@ def history_page(session):
     records = recent_sessions(session, 100)
     if "history_selected_date" not in st.session_state:
         st.session_state.history_selected_date = date.today()
-    if "history_calendar_month" not in st.session_state:
-        st.session_state.history_calendar_month = date.today().replace(day=1)
+    calendar_events = [
+        {
+            "id": "selected-workout-date",
+            "start": st.session_state.history_selected_date.isoformat(),
+            "allDay": True,
+            "display": "background",
+            "backgroundColor": "rgba(25, 118, 210, 0.18)",
+        },
+        *[
+        {
+            "id": str(record.workout_session_id),
+            "title": record.workout.workout_name,
+            "start": record.workout_date.isoformat(),
+            "allDay": True,
+            "backgroundColor": "#1976d2",
+            "borderColor": "#1976d2",
+            "extendedProps": {"workout_session_id": record.workout_session_id},
+        }
+        for record in records
+        ],
+    ]
+    calendar_state = calendar(
+        events=calendar_events,
+        options={
+            "initialView": "dayGridMonth",
+            "initialDate": st.session_state.history_selected_date.isoformat(),
+            "headerToolbar": {"left": "prev,next today", "center": "title", "right": ""},
+            "firstDay": 1,
+            "fixedWeekCount": False,
+            "showNonCurrentDates": False,
+            "navLinks": False,
+            "editable": False,
+            "selectable": False,
+            # Keep date-only callbacks independent of the viewer's timezone.
+            "timeZone": "UTC",
+            "height": "auto",
+        },
+        custom_css="""
+            .fc { font-family: inherit; }
+            .fc .fc-toolbar { gap: 0.5rem; flex-wrap: wrap; }
+            .fc .fc-toolbar-title { font-size: clamp(1.1rem, 4vw, 1.5rem); }
+            .fc .fc-button { text-transform: capitalize; }
+            .fc .fc-daygrid-event { border-radius: 0.35rem; padding: 0.15rem 0.3rem; cursor: pointer; }
+            .fc .fc-daygrid-day { cursor: pointer; }
+            @media (max-width: 640px) {
+                .fc .fc-toolbar { justify-content: center; }
+                .fc .fc-toolbar-chunk { display: flex; justify-content: center; }
+                .fc .fc-col-header-cell-cushion { font-size: 0.72rem; }
+                .fc .fc-daygrid-day-number { padding: 0.3rem; }
+                .fc .fc-daygrid-event { font-size: 0.72rem; }
+            }
+        """,
+        callbacks=["dateClick", "eventClick"],
+        key="workout_calendar",
+    )
+    callback = calendar_state.get("callback") if calendar_state else None
+    callback_id = None
+    if callback == "dateClick":
+        callback_id = f"dateClick:{calendar_state['dateClick']['date']}"
+    elif callback == "eventClick":
+        callback_id = f"eventClick:{calendar_state['eventClick']['event']['id']}"
+
+    # Streamlit components report their last callback value on the next run.
+    # Refresh once to send the new background highlight, then consume that same
+    # callback on the following run without remounting the calendar widget.
+    if callback_id and callback_id == st.session_state.pop("history_calendar_callback_to_ignore", None):
+        callback = None
+
+    if callback == "dateClick":
+        st.session_state.history_selected_date = date.fromisoformat(calendar_state["dateClick"]["date"][:10])
+        st.session_state.pop("history_selected_session_id", None)
+        st.session_state.history_calendar_callback_to_ignore = callback_id
+        st.rerun()
+    if callback == "eventClick":
+        event = calendar_state["eventClick"]["event"]
+        st.session_state.history_selected_date = date.fromisoformat(event["start"][:10])
+        st.session_state.history_selected_session_id = int(event["extendedProps"]["workout_session_id"])
+        st.session_state.history_calendar_callback_to_ignore = callback_id
+        st.rerun()
     selected_date = st.session_state.history_selected_date
-    month = st.session_state.history_calendar_month
-    previous_month = (month.replace(day=1) - timedelta(days=1)).replace(day=1)
-    next_month = (month.replace(day=28) + timedelta(days=4)).replace(day=1)
-    previous, title, today_button, following = st.columns([2, 5, 2, 2])
-    if previous.button("← Previous month"):
-        st.session_state.history_calendar_month = previous_month
-        st.rerun()
-    title.markdown(f"### {month:%B %Y}")
-    if today_button.button("Today"):
-        st.session_state.history_selected_date = date.today()
-        st.session_state.history_calendar_month = date.today().replace(day=1)
-        st.rerun()
-    if following.button("Next month →"):
-        st.session_state.history_calendar_month = next_month
-        st.rerun()
-    by_day = {}
-    for record in records:
-        if record.workout_date.year == month.year and record.workout_date.month == month.month:
-            by_day.setdefault(record.workout_date, []).append(record)
-    st.subheader("Select workout date")
-    st.markdown("<style>.st-key-calendar_grid {max-width: 75%; margin-inline: auto; gap: 0.25rem !important;} .st-key-calendar_grid [data-testid='stVerticalBlock'] {gap: 0.25rem !important;} .st-key-calendar_grid [data-testid='stHorizontalBlock'] {gap: 0.25rem;} .st-key-calendar_grid [class*='st-key-calendar_day_'] [data-testid='stVerticalBlock'] {gap: 0.15rem !important;} @media (max-width: 800px) {.st-key-calendar_grid {max-width: 100%;}}</style>", unsafe_allow_html=True)
-    with st.container(key="calendar_grid"):
-        headers = st.columns(7)
-        for column, label in zip(headers, calendar.day_abbr):
-            column.caption(label)
-        for week in calendar.monthcalendar(month.year, month.month):
-            columns = st.columns(7)
-            for column, day_number in zip(columns, week):
-                if not day_number:
-                    continue
-                day_date, day_records = date(month.year, month.month, day_number), by_day.get(date(month.year, month.month, day_number), [])
-                color = "#7b1fa2" if day_date == selected_date and day_records else "#c62828" if day_date == selected_date else "#1976d2" if day_records else None
-                container_key = f"calendar_day_{day_date:%Y%m%d}"
-                if color:
-                    st.markdown(f"<style>.st-key-{container_key} button {{background-color: {color} !important; border-color: {color} !important; color: white !important;}}</style>", unsafe_allow_html=True)
-                with column:
-                    # A fixed-height cell keeps the entire calendar grid aligned,
-                    # while leaving room to show the logged workout names.
-                    with st.container(height=86, border=False, key=container_key):
-                        if st.button(str(day_number), key=f"calendar_{day_date.isoformat()}", type="secondary"):
-                            st.session_state.history_selected_date = day_date
-                            st.rerun()
-                        if day_records:
-                            st.caption(", ".join(record.workout.workout_name for record in day_records))
     logged = [record for record in records if record.workout_date == selected_date]
-    if logged:
+    selected_session_id = st.session_state.get("history_selected_session_id")
+    if selected_session_id and not any(record.workout_session_id == selected_session_id for record in logged):
+        st.session_state.pop("history_selected_session_id", None)
+        selected_session_id = None
+    displayed_records = (
+        [record for record in logged if record.workout_session_id == selected_session_id]
+        if selected_session_id else logged
+    )
+    if displayed_records:
         st.subheader(f"Already logged on {selected_date:%d %B %Y}")
-        for record in logged:
+        for record in displayed_records:
             record, details = session_details(session, record.workout_session_id)
             st.markdown(f"#### {record.workout.workout_name}")
-            st.dataframe([{"Exercise": exercise.exercise_name, "Weight (kg)": float(state.weight) if state else "—", "Max reps": state.max_reps if state else "—", "Sets": state.sets if state else "—"} for exercise, state in details], hide_index=True, use_container_width=True)
+            st.dataframe([{"Exercise": exercise.exercise_name, "Weight (kg)": float(state.weight) if state else "—", "Max reps": state.max_reps if state else "—", "Sets": state.sets if state else "—"} for exercise, state in details], hide_index=True, width="stretch")
     st.subheader(f"Log a workout on {selected_date:%A, %d %B %Y}")
     all_workouts = workouts(session)
     if all_workouts:
@@ -380,7 +421,7 @@ def admin_page(session):
     primary_keys = [column.name for column in table.primary_key.columns]
     rows = [dict(row, **{"Delete row": False}) for row in session.execute(select(table)).mappings()]
     st.caption("Edit values in place. Tick **Delete row** and save to remove a row.")
-    edited = st.data_editor(rows, num_rows="fixed", disabled=primary_keys, key=f"admin_editor_{table_name}_{st.session_state.admin_editor_revision}", hide_index=True, use_container_width=True)
+    edited = st.data_editor(rows, num_rows="fixed", disabled=primary_keys, key=f"admin_editor_{table_name}_{st.session_state.admin_editor_revision}", hide_index=True, width="stretch")
     if st.button("Save changes", type="primary"):
         try:
             records = edited if isinstance(edited, list) else edited.to_dict("records")
