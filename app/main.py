@@ -93,13 +93,42 @@ def flash(action, message="Saved."):
         st.error(str(exc))
 
 
-def prescription_table(session, items, on_date):
+def prepare_exercise_editor(table_key, exercise_ids):
+    """Record a selected exercise before the dataframe-selection rerun."""
+    selection = st.session_state.get(table_key, {}).get("selection", {})
+    selected_rows = selection.get("rows", [])
+    if not selected_rows:
+        return
+    st.session_state.edit_exercise_id = exercise_ids[selected_rows[0]]
+    st.session_state.app_view = "exercise_edit"
+    st.session_state.main_navigation = "Workouts & exercises"
+
+
+def selectable_prescription_table(exercise_states, key):
+    """Show prescriptions whose selected row opens the exercise editor."""
+    rows = [
+        {
+            "Exercise": exercise.exercise_name,
+            "Weight (kg)": float(state.weight) if state else "—",
+            "Max reps": state.max_reps if state else "—",
+            "Sets": state.sets if state else "—",
+        }
+        for exercise, state in exercise_states
+    ]
+    selectable_table(
+        rows,
+        key,
+        on_select=lambda: prepare_exercise_editor(
+            key, [exercise.exercise_id for exercise, _ in exercise_states]
+        ),
+    )
+
+
+def prescription_table(session, items, on_date, key):
     states = states_for_date(session, [item.exercise_id for item in items], on_date)
-    rows = []
-    for item in items:
-        state = states.get(item.exercise_id)
-        rows.append({"Exercise": item.exercise.exercise_name, "Weight (kg)": float(state.weight) if state else "—", "Max reps": state.max_reps if state else "—", "Sets": state.sets if state else "—"})
-    st.dataframe(rows, hide_index=True, width="stretch")
+    selectable_prescription_table(
+        [(item.exercise, states.get(item.exercise_id)) for item in items], key
+    )
 
 
 def back_to_library():
@@ -118,8 +147,8 @@ def reset_workout_draft():
             del st.session_state[key]
 
 
-def selectable_table(rows, key):
-    event = st.dataframe(rows, hide_index=True, width="stretch", key=key, on_select="rerun", selection_mode="single-row")
+def selectable_table(rows, key, on_select="rerun"):
+    event = st.dataframe(rows, hide_index=True, width="stretch", key=key, on_select=on_select, selection_mode="single-row")
     selected = event.selection.rows
     return selected[0] if selected else None
 
@@ -421,7 +450,10 @@ def history_page(session):
                     st.session_state.saved_message = "Workout entry deleted."
                     st.session_state.pop("history_selected_session_id", None)
                     st.rerun()
-            st.dataframe([{"Exercise": exercise.exercise_name, "Weight (kg)": float(state.weight) if state else "—", "Max reps": state.max_reps if state else "—", "Sets": state.sets if state else "—"} for exercise, state in details], hide_index=True, width="stretch")
+            selectable_prescription_table(
+                details,
+                key=f"logged_workout_exercises_{record.workout_session_id}",
+            )
             st.markdown("**Session notes**")
             st.write(record.notes or "No session notes.")
     st.subheader(f"Log a workout on {selected_date:%A, %d %B %Y}")
@@ -430,7 +462,12 @@ def history_page(session):
         selected = st.selectbox("Workout to log", all_workouts, format_func=lambda workout: workout.workout_name)
         items = workout_exercises_for_date(session, selected.workout_id, selected_date)
         if items:
-            prescription_table(session, items, selected_date)
+            prescription_table(
+                session,
+                items,
+                selected_date,
+                key=f"new_workout_exercises_{selected.workout_id}_{selected_date.isoformat()}",
+            )
             session_notes = st.text_area("Session notes (optional)", key=f"session_notes_{selected.workout_id}_{selected_date.isoformat()}")
             if st.button(f"Log {selected.workout_name} on {selected_date:%d %b}", type="primary"):
                 flash(lambda: log_workout(session, selected.workout_id, selected_date, session_notes), "Workout logged.")
@@ -500,7 +537,7 @@ try:
     if "app_view" not in st.session_state: st.session_state.app_view = "library"
     if message := st.session_state.pop("saved_message", None):
         st.toast(message, icon="✅", duration="short")
-    section = st.radio("Navigate", ["Log workouts", "Workouts & exercises", "Admin"], horizontal=True, label_visibility="collapsed")
+    section = st.radio("Navigate", ["Log workouts", "Workouts & exercises", "Admin"], horizontal=True, label_visibility="collapsed", key="main_navigation")
     if section == "Workouts & exercises":
         {"library": library_page, "workout_create": workout_create_page, "workout_edit": workout_edit_page, "exercise_create": exercise_create_page, "exercise_edit": exercise_edit_page}[st.session_state.app_view](session)
     elif section == "Log workouts":
