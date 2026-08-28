@@ -79,6 +79,22 @@ def update_workout(session: Session, workout: Workout, name: str, description: s
 
 
 def deactivate_exercise(session: Session, exercise: Exercise) -> None:
+    active_workouts = list(session.scalars(
+        select(Workout.workout_name).distinct()
+        .join(WorkoutExercise, WorkoutExercise.workout_id == Workout.workout_id)
+        .where(
+            WorkoutExercise.exercise_id == exercise.exercise_id,
+            WorkoutExercise.effective_to.is_(None),
+            Workout.is_active.is_(True),
+        )
+        .order_by(Workout.workout_name)
+    ))
+    if active_workouts:
+        raise ValidationError(
+            "Cannot delete this exercise because it is still active in: "
+            + ", ".join(active_workouts)
+            + ". Remove it from those workouts or delete the workouts first."
+        )
     exercise.is_active = False
     session.commit()
 
@@ -216,6 +232,14 @@ def log_workout(session: Session, workout_id: int, workout_date: date, notes: st
         session.rollback()
         raise ValidationError("This workout is already logged on that date.") from exc
     return record
+
+
+def delete_workout_session(session: Session, workout_session_id: int) -> None:
+    record = session.get(WorkoutSession, workout_session_id)
+    if not record:
+        raise ValidationError("Workout session not found.")
+    session.delete(record)
+    session.commit()
 
 
 def workouts(session: Session) -> list[Workout]:

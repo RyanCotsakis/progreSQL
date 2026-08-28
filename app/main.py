@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 import sys
@@ -22,7 +22,7 @@ from app.db import DEFAULT_DATABASE_URL, configure_database, get_session
 from app.models import ExerciseSettingsHistory
 from app.services import (
     ValidationError, create_exercise_with_initial_state, create_workout,
-    deactivate_exercise, deactivate_workout, exercises, log_workout,
+    deactivate_exercise, deactivate_workout, delete_workout_session, exercises, log_workout,
     last_recorded_workout_date, recent_sessions, session_details, sessions_on_date, set_exercise_state,
     states_for_date,
     set_workout_exercises, state_for_date, update_exercise, update_workout,
@@ -30,6 +30,8 @@ from app.services import (
 )
 
 st.set_page_config(page_title="ProgreSQL", page_icon="💪", layout="wide")
+
+AUTH_SESSION_TIMEOUT = timedelta(hours=1)
 
 
 def require_authorized_user() -> None:
@@ -40,12 +42,20 @@ def require_authorized_user() -> None:
         st.error("Authentication has not been configured. Run scripts/setup_local_auth.py locally.")
         st.stop()
 
-    if st.session_state.get("authenticated"):
-        st.sidebar.caption(f"Signed in as {st.secrets.auth_username}")
-        if st.sidebar.button("Sign out"):
+    authenticated_at = st.session_state.get("authenticated_at")
+    if st.session_state.get("authenticated") and isinstance(authenticated_at, datetime):
+        if datetime.now() - authenticated_at >= AUTH_SESSION_TIMEOUT:
             st.session_state.clear()
-            st.rerun()
-        return
+            st.warning("Your session has expired. Please sign in again.")
+        else:
+            st.sidebar.caption(f"Signed in as {st.secrets.auth_username}")
+            if st.sidebar.button("Sign out"):
+                st.session_state.clear()
+                st.rerun()
+            return
+    elif st.session_state.get("authenticated"):
+        # Sessions created before the timeout was introduced must reauthenticate.
+        st.session_state.clear()
 
     st.title("ProgreSQL")
     st.caption("Sign in with your password and Microsoft Authenticator code.")
@@ -65,6 +75,7 @@ def require_authorized_user() -> None:
         totp_ok = pyotp.TOTP(st.secrets.auth_totp_secret).verify(totp_code, valid_window=1)
         if username_ok and password_ok and totp_ok:
             st.session_state.authenticated = True
+            st.session_state.authenticated_at = datetime.now()
             st.rerun()
         st.error("Invalid username, password, or authenticator code.")
     st.stop()
@@ -202,7 +213,10 @@ def workout_edit_page(session):
         st.session_state.workout_draft_ids = [item.exercise_id for item in current]
         st.session_state[selection_key] = list(st.session_state.workout_draft_ids)
     draft = st.session_state.workout_draft_ids
+    # Preserve a deactivated exercise in this date's composition so historical
+    # workout versions can still be viewed and amended without losing members.
     by_id = {exercise.exercise_id: exercise for exercise in exercises(session)}
+    by_id.update({item.exercise_id: item.exercise for item in current})
     st.subheader("Change exercises")
     st.caption("Choose the exercises, then arrange them below. Nothing is written to the database until you save.")
     selected_ids = st.multiselect(
@@ -329,9 +343,13 @@ def exercise_edit_page(session):
                 flash(lambda: set_exercise_state(session, exercise.exercise_id, effective, Decimal(str(weight)), reps, sets, notes), "State change saved.")
                 st.rerun()
     if st.button("Delete exercise"):
-        deactivate_exercise(session, exercise)
-        st.session_state.saved_message = "Exercise deleted."
-        back_to_library()
+        try:
+            deactivate_exercise(session, exercise)
+        except ValidationError as exc:
+            st.toast(str(exc), icon="⚠️", duration="long")
+        else:
+            st.session_state.saved_message = "Exercise deleted."
+            back_to_library()
 
 
 def history_page(session):
@@ -397,7 +415,19 @@ def history_page(session):
         for record in displayed_records:
             record, details = session_details(session, record.workout_session_id)
             st.markdown(f"#### {record.workout.workout_name}")
+            st.write(record.workout.description or "No workout description.")
+            if st.button("Delete entry", key=f"delete_session_{record.workout_session_id}"):
+                try:
+                    delete_workout_session(session, record.workout_session_id)
+                except ValidationError as exc:
+                    st.error(str(exc))
+                else:
+                    st.session_state.saved_message = "Workout entry deleted."
+                    st.session_state.pop("history_selected_session_id", None)
+                    st.rerun()
             st.dataframe([{"Exercise": exercise.exercise_name, "Weight (kg)": float(state.weight) if state else "—", "Max reps": state.max_reps if state else "—", "Sets": state.sets if state else "—"} for exercise, state in details], hide_index=True, width="stretch")
+            st.markdown("**Session notes**")
+            st.write(record.notes or "No session notes.")
     st.subheader(f"Log a workout on {selected_date:%A, %d %B %Y}")
     all_workouts = workouts(session)
     if all_workouts:
@@ -405,8 +435,9 @@ def history_page(session):
         items = workout_exercises_for_date(session, selected.workout_id, selected_date)
         if items:
             prescription_table(session, items, selected_date)
+            session_notes = st.text_area("Session notes (optional)", key=f"session_notes_{selected.workout_id}_{selected_date.isoformat()}")
             if st.button(f"Log {selected.workout_name} on {selected_date:%d %b}", type="primary"):
-                flash(lambda: log_workout(session, selected.workout_id, selected_date), "Workout logged.")
+                flash(lambda: log_workout(session, selected.workout_id, selected_date, session_notes), "Workout logged.")
                 st.rerun()
         else:
             st.info("This workout has no exercises configured for the selected date.")

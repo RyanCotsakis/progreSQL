@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy.orm import sessionmaker
 
 from app.db import Base, make_engine
-from app.services import (ValidationError, add_exercise_to_workout, create_exercise, create_exercise_with_initial_state, create_workout, deactivate_exercise, deactivate_workout, exercises, last_recorded_workout_date, log_workout, recent_sessions, session_details, set_exercise_state, set_workout_exercises, state_for_date, workout_exercises_for_date, workouts)
+from app.services import (ValidationError, add_exercise_to_workout, create_exercise, create_exercise_with_initial_state, create_workout, deactivate_exercise, deactivate_workout, delete_workout_session, exercises, last_recorded_workout_date, log_workout, recent_sessions, session_details, sessions_on_date, set_exercise_state, set_workout_exercises, state_for_date, workout_exercises_for_date, workouts)
 
 
 @pytest.fixture
@@ -116,11 +116,47 @@ def test_workout_composition_is_effective_dated_and_same_day_edits_apply_to_sess
 def test_soft_deleted_entities_are_hidden_from_active_lists_but_remain_in_history(session):
     bench, push = setup_push(session)
     record = log_workout(session, push.workout_id, date(2026, 1, 15))
-    deactivate_exercise(session, bench)
     deactivate_workout(session, push)
+    deactivate_exercise(session, bench)
 
     assert exercises(session) == []
     assert workouts(session) == []
     assert recent_sessions(session)[0].workout_session_id == record.workout_session_id
     _, details = session_details(session, record.workout_session_id)
     assert details[0][0].exercise_name == "Bench Press"
+
+
+def test_cannot_deactivate_exercise_with_an_open_active_workout_membership(session):
+    bench, push = setup_push(session)
+
+    with pytest.raises(ValidationError, match="Push"):
+        deactivate_exercise(session, bench)
+
+    assert bench.is_active is True
+
+
+def test_can_deactivate_exercise_after_its_workout_membership_ends(session):
+    bench, push = setup_push(session)
+    set_workout_exercises(session, push, [], date(2026, 2, 1))
+
+    deactivate_exercise(session, bench)
+
+    assert bench.is_active is False
+
+
+def test_can_deactivate_exercise_still_in_an_inactive_workout(session):
+    bench, push = setup_push(session)
+    deactivate_workout(session, push)
+
+    deactivate_exercise(session, bench)
+
+    assert bench.is_active is False
+
+
+def test_delete_workout_session_hard_deletes_the_record(session):
+    _, push = setup_push(session)
+    record = log_workout(session, push.workout_id, date(2026, 1, 15), "Felt strong.")
+
+    delete_workout_session(session, record.workout_session_id)
+
+    assert sessions_on_date(session, date(2026, 1, 15)) == []
