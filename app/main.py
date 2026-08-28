@@ -356,51 +356,47 @@ def history_page(session):
     st.title("Log workouts")
     if "history_selected_date" not in st.session_state:
         st.session_state.history_selected_date = date.today()
-    if st.toggle("Show workout calendar", value=False, help="The date picker is faster. Open the calendar only when you need to browse previous workouts."):
-        records = recent_sessions(session, 100)
-        calendar_events = [
-            {
-                "id": str(record.workout_session_id),
-                "title": record.workout.workout_name,
-                "start": record.workout_date.isoformat(),
-                "allDay": True,
-                "backgroundColor": "#1976d2",
-                "borderColor": "#1976d2",
-                "extendedProps": {"workout_session_id": record.workout_session_id},
-            }
-            for record in records
-        ]
-        calendar_state = calendar(
-            events=calendar_events,
-            options={
-                "initialView": "dayGridMonth",
-                "initialDate": st.session_state.history_selected_date.isoformat(),
-                "headerToolbar": {"left": "prev,next today", "center": "title", "right": ""},
-                "firstDay": 1,
-                "fixedWeekCount": False,
-                "showNonCurrentDates": False,
-                "navLinks": False,
-                "editable": False,
-                "selectable": False,
-                "timeZone": "UTC",
-                "height": "auto",
-            },
-            callbacks=["dateClick", "eventClick"],
-            key="workout_calendar",
-        )
-        callback = calendar_state.get("callback") if calendar_state else None
-        if callback == "dateClick":
-            st.session_state.history_selected_date = date.fromisoformat(calendar_state["dateClick"]["date"][:10])
-            st.session_state.pop("history_selected_session_id", None)
-        elif callback == "eventClick":
-            event = calendar_state["eventClick"]["event"]
-            st.session_state.history_selected_date = date.fromisoformat(event["start"][:10])
-            st.session_state.history_selected_session_id = int(event["extendedProps"]["workout_session_id"])
-
-    selected_date = st.date_input("Workout date", st.session_state.history_selected_date)
-    if selected_date != st.session_state.history_selected_date:
-        st.session_state.history_selected_date = selected_date
+    records = recent_sessions(session, 100)
+    calendar_events = [
+        {
+            "id": str(record.workout_session_id),
+            "title": record.workout.workout_name,
+            "start": record.workout_date.isoformat(),
+            "allDay": True,
+            "backgroundColor": "#1976d2",
+            "borderColor": "#1976d2",
+            "extendedProps": {"workout_session_id": record.workout_session_id},
+        }
+        for record in records
+    ]
+    calendar_state = calendar(
+        events=calendar_events,
+        options={
+            "initialView": "dayGridMonth",
+            "initialDate": st.session_state.history_selected_date.isoformat(),
+            "headerToolbar": {"left": "prev,next today", "center": "title", "right": ""},
+            "firstDay": 1,
+            "fixedWeekCount": False,
+            "showNonCurrentDates": False,
+            "navLinks": False,
+            "editable": False,
+            "selectable": False,
+            "timeZone": "UTC",
+            "height": "auto",
+        },
+        callbacks=["dateClick", "eventClick"],
+        key="workout_calendar",
+    )
+    callback = calendar_state.get("callback") if calendar_state else None
+    if callback == "dateClick":
+        st.session_state.history_selected_date = date.fromisoformat(calendar_state["dateClick"]["date"][:10])
         st.session_state.pop("history_selected_session_id", None)
+    elif callback == "eventClick":
+        event = calendar_state["eventClick"]["event"]
+        st.session_state.history_selected_date = date.fromisoformat(event["start"][:10])
+        st.session_state.history_selected_session_id = int(event["extendedProps"]["workout_session_id"])
+
+    selected_date = st.session_state.history_selected_date
     logged = sessions_on_date(session, selected_date)
     selected_session_id = st.session_state.get("history_selected_session_id")
     if selected_session_id and not any(record.workout_session_id == selected_session_id for record in logged):
