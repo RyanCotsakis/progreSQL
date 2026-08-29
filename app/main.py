@@ -32,6 +32,7 @@ from app.services import (
 st.set_page_config(page_title="ProgreSQL", page_icon="💪", layout="wide")
 
 AUTH_SESSION_TIMEOUT = timedelta(hours=1)
+APP_VERSION = "0.9"
 
 
 def require_authorized_user() -> None:
@@ -78,6 +79,7 @@ def require_authorized_user() -> None:
             st.session_state.authenticated_at = datetime.now()
             st.rerun()
         st.error("Invalid username, password, or authenticator code.")
+    st.caption(f"Version {APP_VERSION}")
     st.stop()
 
 
