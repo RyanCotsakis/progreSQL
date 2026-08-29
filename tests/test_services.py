@@ -75,8 +75,9 @@ def test_inserting_mid_history_splits_a_period_without_overlap(session):
     assert state_for_date(session, bench.exercise_id, date(2026, 2, 1)).weight == 60
     assert state_for_date(session, bench.exercise_id, date(2026, 4, 1)).weight == 65
     assert state_for_date(session, bench.exercise_id, date(2026, 8, 1)).weight == 70
-    with pytest.raises(ValidationError):
-        set_exercise_state(session, bench.exercise_id, date(2026, 3, 1), 66, 8, 3)
+    corrected = set_exercise_state(session, bench.exercise_id, date(2026, 3, 1), 66, 8, 3)
+    assert corrected.effective_to == date(2026, 7, 1)
+    assert state_for_date(session, bench.exercise_id, date(2026, 4, 1)).weight == 66
 
 
 def test_same_day_open_ended_state_change_is_overwritten(session):

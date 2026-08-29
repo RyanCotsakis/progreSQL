@@ -191,8 +191,8 @@ def states_for_date(session: Session, exercise_ids: list[int], on_date: date) ->
 def set_exercise_state(session: Session, exercise_id: int, effective_from: date, weight: Decimal | float | str, max_reps: int, sets: int, notes: str | None = None) -> ExerciseSettingsHistory:
     """Insert a state change, splitting the period that covers its start date.
 
-    A same-date correction overwrites an open-ended state. Historical rows remain
-    immutable so past prescriptions cannot be changed accidentally.
+    A same-date correction overwrites the existing state while preserving its
+    effective date range.
     """
     weight = Decimal(str(weight))
     if weight < 0 or max_reps <= 0 or sets <= 0:
@@ -203,15 +203,12 @@ def set_exercise_state(session: Session, exercise_id: int, effective_from: date,
             ExerciseSettingsHistory.effective_from == effective_from,
         ))
         if existing:
-            if existing.effective_to is None:
-                existing.weight = weight
-                existing.max_reps = max_reps
-                existing.sets = sets
-                existing.notes = notes or None
-                session.flush()
-                new_state = existing
-            else:
-                raise ValidationError("A historical state change already starts on this date and cannot be overwritten.")
+            existing.weight = weight
+            existing.max_reps = max_reps
+            existing.sets = sets
+            existing.notes = notes or None
+            session.flush()
+            new_state = existing
         else:
             covering = state_for_date(session, exercise_id, effective_from)
             if covering:
