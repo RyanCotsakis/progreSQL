@@ -79,6 +79,18 @@ def test_inserting_mid_history_splits_a_period_without_overlap(session):
         set_exercise_state(session, bench.exercise_id, date(2026, 3, 1), 66, 8, 3)
 
 
+def test_same_day_open_ended_state_change_is_overwritten(session):
+    bench, _ = setup_push(session)
+    original = set_exercise_state(session, bench.exercise_id, date(2026, 3, 1), 65, 10, 3, "Original")
+
+    replacement = set_exercise_state(session, bench.exercise_id, date(2026, 3, 1), 67.5, 8, 4, "Corrected")
+
+    assert replacement.exercise_settings_id == original.exercise_settings_id
+    assert replacement.effective_to is None
+    assert (replacement.weight, replacement.max_reps, replacement.sets, replacement.notes) == (67.5, 8, 4, "Corrected")
+    assert state_for_date(session, bench.exercise_id, date(2026, 3, 1)).exercise_settings_id == original.exercise_settings_id
+
+
 def test_historical_workout_uses_state_effective_on_workout_date(session):
     bench, push = setup_push(session)
     set_exercise_state(session, bench.exercise_id, date(2026, 1, 1), 60, 10, 3)

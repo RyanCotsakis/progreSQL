@@ -191,34 +191,43 @@ def states_for_date(session: Session, exercise_ids: list[int], on_date: date) ->
 def set_exercise_state(session: Session, exercise_id: int, effective_from: date, weight: Decimal | float | str, max_reps: int, sets: int, notes: str | None = None) -> ExerciseSettingsHistory:
     """Insert a state change, splitting the period that covers its start date.
 
-    Existing history is never overwritten; a same-date correction is rejected so it
-    can be explicitly handled later rather than silently losing audit information.
+    A same-date correction overwrites an open-ended state. Historical rows remain
+    immutable so past prescriptions cannot be changed accidentally.
     """
     weight = Decimal(str(weight))
     if weight < 0 or max_reps <= 0 or sets <= 0:
         raise ValidationError("Weight must be non-negative; reps and sets must be positive.")
     with session.begin_nested():
-        exists = session.scalar(select(ExerciseSettingsHistory.exercise_settings_id).where(
+        existing = session.scalar(select(ExerciseSettingsHistory).where(
             ExerciseSettingsHistory.exercise_id == exercise_id,
             ExerciseSettingsHistory.effective_from == effective_from,
         ))
-        if exists:
-            raise ValidationError("A state change already starts on this date. Historical rows are not overwritten.")
-        covering = state_for_date(session, exercise_id, effective_from)
-        if covering:
-            inherited_end = covering.effective_to
-            covering.effective_to = effective_from
+        if existing:
+            if existing.effective_to is None:
+                existing.weight = weight
+                existing.max_reps = max_reps
+                existing.sets = sets
+                existing.notes = notes or None
+                session.flush()
+                new_state = existing
+            else:
+                raise ValidationError("A historical state change already starts on this date and cannot be overwritten.")
         else:
-            # A new state in a gap (including before the first future state) ends
-            # at the next known change, so it cannot overlap that later period.
-            next_state = session.scalar(select(ExerciseSettingsHistory).where(
-                ExerciseSettingsHistory.exercise_id == exercise_id,
-                ExerciseSettingsHistory.effective_from > effective_from,
-            ).order_by(ExerciseSettingsHistory.effective_from))
-            inherited_end = next_state.effective_from if next_state else None
-        new_state = ExerciseSettingsHistory(exercise_id=exercise_id, effective_from=effective_from, effective_to=inherited_end, weight=weight, max_reps=max_reps, sets=sets, notes=notes or None)
-        session.add(new_state)
-        session.flush()
+            covering = state_for_date(session, exercise_id, effective_from)
+            if covering:
+                inherited_end = covering.effective_to
+                covering.effective_to = effective_from
+            else:
+                # A new state in a gap (including before the first future state) ends
+                # at the next known change, so it cannot overlap that later period.
+                next_state = session.scalar(select(ExerciseSettingsHistory).where(
+                    ExerciseSettingsHistory.exercise_id == exercise_id,
+                    ExerciseSettingsHistory.effective_from > effective_from,
+                ).order_by(ExerciseSettingsHistory.effective_from))
+                inherited_end = next_state.effective_from if next_state else None
+            new_state = ExerciseSettingsHistory(exercise_id=exercise_id, effective_from=effective_from, effective_to=inherited_end, weight=weight, max_reps=max_reps, sets=sets, notes=notes or None)
+            session.add(new_state)
+            session.flush()
     session.commit()
     return new_state
 
