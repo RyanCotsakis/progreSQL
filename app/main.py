@@ -32,7 +32,7 @@ from app.services import (
 st.set_page_config(page_title="ProgreSQL", page_icon="💪", layout="wide")
 
 AUTH_SESSION_TIMEOUT = timedelta(hours=1)
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 
 
 def require_authorized_user() -> None:
@@ -387,6 +387,21 @@ def history_page(session):
     st.title("Log workouts")
     if "history_selected_date" not in st.session_state:
         st.session_state.history_selected_date = date.today()
+    if "history_calendar_instance" not in st.session_state:
+        st.session_state.history_calendar_instance = 0
+
+    def select_today_for_history() -> None:
+        """Keep the calendar and logging form focused on the same date."""
+        st.session_state.history_selected_date = date.today()
+        st.session_state.pop("history_selected_session_id", None)
+        # ``initialDate`` is read when FullCalendar is mounted.  A new
+        # component key makes the calendar navigate back to today as well.
+        st.session_state.history_calendar_instance += 1
+
+    calendar_actions, _ = st.columns([1, 7])
+    with calendar_actions:
+        st.button("Today", on_click=select_today_for_history)
+
     records = recent_sessions(session, 100)
     calendar_events = [
         {
@@ -405,7 +420,7 @@ def history_page(session):
         options={
             "initialView": "dayGridMonth",
             "initialDate": st.session_state.history_selected_date.isoformat(),
-            "headerToolbar": {"left": "prev,next today", "center": "title", "right": ""},
+            "headerToolbar": {"left": "prev,next", "center": "title", "right": ""},
             "firstDay": 1,
             "fixedWeekCount": False,
             "showNonCurrentDates": False,
@@ -413,10 +428,13 @@ def history_page(session):
             "editable": False,
             "selectable": False,
             "timeZone": "UTC",
-            "height": "auto",
+            # Six-week months need more room than the component's initial
+            # auto-sized iframe; a stable height prevents the final row from
+            # being hidden behind the logging controls below.
+            "height": 650,
         },
         callbacks=["dateClick", "eventClick"],
-        key="workout_calendar",
+        key=f"workout_calendar_{st.session_state.history_calendar_instance}",
     )
     callback = calendar_state.get("callback") if calendar_state else None
     if callback == "dateClick":
