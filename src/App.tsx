@@ -1,3 +1,8 @@
+import {
+  latestWorkouts,
+  monthSessions,
+  workoutColour,
+} from "../shared/journal";
 import { Login } from "./components/Login";
 import {
   useCallback,
@@ -318,7 +323,7 @@ export default function App() {
           }
         </main>
         <footer className="mx-auto flex max-w-[1300px] justify-between px-5 py-6 text-xs text-muted-foreground sm:px-10">
-          <span>ProgreSQL · 2.0.2</span>
+          <span>ProgreSQL · 2.1.0</span>
         </footer>
       </div>
       {((error && data) || notice) && (
@@ -433,10 +438,12 @@ function PrescriptionTable({
   data,
   workoutId,
   day,
+  editExercise,
 }: {
   data: AppData;
   workoutId: number;
   day: string;
+  editExercise?: (id: number) => void;
 }) {
   const members = membersFor(data, workoutId, day);
   if (!members.length)
@@ -470,7 +477,18 @@ function PrescriptionTable({
                       {String(i + 1).padStart(2, "0")}
                     </span>
                     <div className="font-medium">
-                      {exercise?.exercise_name}
+                      {editExercise && exercise ? (
+                        <button
+                          type="button"
+                          className="text-left text-primary underline decoration-primary/30 underline-offset-4 hover:decoration-primary"
+                          aria-label={`Edit ${exercise.exercise_name}`}
+                          onClick={() => editExercise(exercise.exercise_id)}
+                        >
+                          {exercise.exercise_name}
+                        </button>
+                      ) : (
+                        exercise?.exercise_name
+                      )}
                       <p className="mt-1 text-xs font-normal text-muted-foreground">
                         {exercise?.equipment}
                       </p>
@@ -504,7 +522,10 @@ function Calendar({
   const start = new Date(month + "-01T12:00:00");
   const offset = (start.getDay() + 6) % 7;
   const days = new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate();
-  const logged = new Set(data.sessions.map((s) => s.workout_date));
+  const logged = monthSessions(data.sessions, month);
+  const workoutName = (id: number) =>
+    data.workouts.find((w) => w.workout_id === id)?.workout_name ||
+    `Workout ${id}`;
   const shift = (direction: number) =>
     setMonth(
       localDay(
@@ -512,83 +533,111 @@ function Calendar({
       ).slice(0, 7),
     );
   return (
-    <Card>
-      <div className="mb-5 flex items-center justify-between">
-        <h2 className="font-semibold">
-          {start.toLocaleDateString("en-GB", {
-            month: "long",
-            year: "numeric",
+    <section aria-label="Workout calendar">
+      <Card>
+        <div className="mb-5 flex items-center justify-between">
+          <h2 className="font-semibold">
+            {start.toLocaleDateString("en-GB", {
+              month: "long",
+              year: "numeric",
+            })}
+          </h2>
+          <div className="flex">
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Previous month"
+              onClick={() => shift(-1)}
+            >
+              <ChevronLeft />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Next month"
+              onClick={() => shift(1)}
+            >
+              <ChevronRight />
+            </Button>
+          </div>
+        </div>
+        <div className="grid grid-cols-7 gap-1 text-center">
+          {["M", "T", "W", "T", "F", "S", "S"].map((d, i) => (
+            <span key={i} className="py-2 text-xs text-muted-foreground">
+              {d}
+            </span>
+          ))}
+          {Array.from({ length: offset }, (_, i) => (
+            <span key={`empty-${i}`} />
+          ))}
+          {Array.from({ length: days }, (_, i) => {
+            const date = `${month}-${String(i + 1).padStart(2, "0")}`;
+            const workoutIds = logged.byDay.get(date) || [];
+            return (
+              <button
+                key={date}
+                onClick={() => setDay(date)}
+                aria-label={`${fmt(date)}${workoutIds.length ? ": " + workoutIds.map(workoutName).join(", ") : ""}`}
+                aria-pressed={day === date}
+                className={cn(
+                  "relative flex min-h-11 flex-col items-center justify-center rounded-lg text-sm",
+                  day === date
+                    ? "bg-primary font-medium text-white"
+                    : date === localDay()
+                      ? "bg-primary/8 font-semibold text-primary"
+                      : "hover:bg-muted",
+                )}
+              >
+                <span>{i + 1}</span>
+                <span
+                  className="mt-1 flex max-w-full flex-wrap justify-center gap-0.5 px-1"
+                  aria-hidden="true"
+                >
+                  {workoutIds.map((id) => (
+                    <span
+                      key={id}
+                      title={workoutName(id)}
+                      className="size-1.5 rounded-full ring-1 ring-white/70"
+                      style={{ backgroundColor: workoutColour(id) }}
+                    />
+                  ))}
+                </span>
+              </button>
+            );
           })}
-        </h2>
-        <div className="flex">
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Previous month"
-            onClick={() => shift(-1)}
+        </div>
+        <div className="mt-5 flex items-start justify-between gap-3 border-t pt-4">
+          <ul
+            aria-label="Workouts logged this month"
+            className="min-w-0 space-y-2 text-xs text-muted-foreground"
           >
-            <ChevronLeft />
-          </Button>
+            {logged.workoutIds.map((id) => (
+              <li key={id} className="flex items-center gap-2">
+                <span
+                  aria-hidden="true"
+                  className="size-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: workoutColour(id) }}
+                />
+                <span className="break-words">{workoutName(id)}</span>
+              </li>
+            ))}
+          </ul>
           <Button
+            size="sm"
             variant="ghost"
-            size="icon"
-            aria-label="Next month"
-            onClick={() => shift(1)}
+            onClick={() => {
+              setMonth(localDay().slice(0, 7));
+              setDay(localDay());
+            }}
           >
-            <ChevronRight />
+            Today
           </Button>
         </div>
-      </div>
-      <div className="grid grid-cols-7 gap-1 text-center">
-        {["M", "T", "W", "T", "F", "S", "S"].map((d, i) => (
-          <span key={i} className="py-2 text-xs text-muted-foreground">
-            {d}
-          </span>
-        ))}
-        {Array.from({ length: offset }, (_, i) => (
-          <span key={`empty-${i}`} />
-        ))}
-        {Array.from({ length: days }, (_, i) => {
-          const date = `${month}-${String(i + 1).padStart(2, "0")}`;
-          return (
-            <button
-              key={date}
-              onClick={() => setDay(date)}
-              aria-label={`${fmt(date)}${logged.has(date) ? ", workout logged" : ""}`}
-              aria-pressed={day === date}
-              className={cn(
-                "relative flex min-h-11 flex-col items-center justify-center rounded-lg text-sm",
-                day === date
-                  ? "bg-primary font-medium text-white"
-                  : date === localDay()
-                    ? "bg-primary/8 font-semibold text-primary"
-                    : "hover:bg-muted",
-              )}
-            >
-              <span>{i + 1}</span>
-              {logged.has(date) && (
-                <span
-                  className={cn(
-                    "absolute bottom-1 size-1 rounded-full",
-                    day === date ? "bg-white" : "bg-primary",
-                  )}
-                />
-              )}
-            </button>
-          );
-        })}
-      </div>
-      <div className="mt-5 flex items-center justify-between border-t pt-4">
-        <span className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="size-1.5 rounded-full bg-primary" /> Workout logged
-        </span>
-        <Button size="sm" variant="ghost" onClick={() => setDay(localDay())}>
-          Today
-        </Button>
-      </div>
-    </Card>
+      </Card>
+    </section>
   );
 }
+
 function Journal({
   data,
   day,
@@ -613,6 +662,7 @@ function Journal({
   const logged = data.sessions.filter((s) => s.workout_date === day);
   const exists = logged.some((s) => s.workout_id === workoutId);
   const today = localDay();
+  const latest = latestWorkouts(data.sessions, today);
   const startWeek = new Date(today + "T12:00:00");
   startWeek.setDate(startWeek.getDate() - ((startWeek.getDay() + 6) % 7));
   const weekCount = data.sessions.filter(
@@ -625,7 +675,7 @@ function Journal({
         title="Your workout journal"
         description="Log workouts and review your sessions."
       />
-      <div className="mb-8 grid grid-cols-3 gap-2 sm:gap-4">
+      <div className="mb-8 grid grid-cols-2 gap-3 lg:grid-cols-[1fr_1fr_2fr] sm:gap-4">
         {[
           {
             title: "This week",
@@ -638,12 +688,6 @@ function Journal({
             value: data.sessions.length,
             suffix: "sessions logged",
             icon: TrendingUp,
-          },
-          {
-            title: "Your workouts",
-            value: active.length,
-            suffix: "active workouts",
-            icon: Dumbbell,
           },
         ].map((stat) => (
           <Card key={stat.title} className="!p-3 sm:!p-5">
@@ -661,6 +705,50 @@ function Journal({
             </p>
           </Card>
         ))}
+        <Card className="col-span-2 min-w-0 !p-3 sm:!p-5 lg:col-span-1">
+          <section aria-label="Most recent workout">
+            <h2 className="text-xs text-muted-foreground sm:text-sm">
+              Most recent workout
+            </h2>
+            {latest ? (
+              <>
+                <p className="mt-2 text-sm font-medium">
+                  <time dateTime={latest.date}>{fmt(latest.date)}</time>
+                  <span className="text-muted-foreground">
+                    {" "}
+                    ·{" "}
+                    {latest.daysAgo === 0
+                      ? "Today · 0 days ago"
+                      : latest.daysAgo === 1
+                        ? "1 day ago"
+                        : latest.daysAgo < 0
+                          ? `In ${-latest.daysAgo} days`
+                          : `${latest.daysAgo} days ago`}
+                  </span>
+                </p>
+                <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                  {latest.workoutIds.map((id) => (
+                    <li key={id} className="flex min-w-0 items-center gap-2">
+                      <span
+                        aria-hidden="true"
+                        className="size-2 shrink-0 rounded-full"
+                        style={{ backgroundColor: workoutColour(id) }}
+                      />
+                      <span className="break-words">
+                        {data.workouts.find((w) => w.workout_id === id)
+                          ?.workout_name || `Workout ${id}`}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <p className="mt-3 text-sm text-muted-foreground">
+                No sessions logged yet.
+              </p>
+            )}
+          </section>
+        </Card>
       </div>
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
         <Card>
@@ -705,6 +793,7 @@ function Journal({
                   data={data}
                   workoutId={workoutId}
                   day={day}
+                  editExercise={(id) => open({ type: "exercise", id })}
                 />
               </div>
               <label
@@ -738,7 +827,7 @@ function Journal({
                           workout_date: day,
                           notes,
                         },
-                        "Workout logged. Keep showing up!",
+                        "Workout logged.",
                       )
                     )
                       setNotes("");

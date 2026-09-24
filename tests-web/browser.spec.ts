@@ -13,6 +13,16 @@ test("create, prescribe, arrange, log, and revisit a workout on desktop and mobi
   await expect(
     page.getByRole("heading", { name: "Welcome back" }),
   ).toBeVisible();
+  if (testInfo.project.name === "mobile") {
+    const password = page.getByLabel("Password", { exact: true });
+    await password.focus();
+    expect(
+      await password.evaluate((el) =>
+        parseFloat(getComputedStyle(el).fontSize),
+      ),
+    ).toBeGreaterThanOrEqual(16);
+    expect(await page.evaluate(() => window.visualViewport?.scale)).toBe(1);
+  }
   await page.getByLabel("Username", { exact: true }).fill("browser-test-user");
   await page
     .getByLabel("Password", { exact: true })
@@ -75,7 +85,20 @@ test("create, prescribe, arrange, log, and revisit a workout on desktop and mobi
   await expect(
     page.getByRole("button", { name: "Already logged", exact: true }),
   ).toBeDisabled();
-  await page.getByRole("button", { name: "My library", exact: true }).click();
+  const calendar = page.getByRole("region", { name: "Workout calendar" });
+  const legend = calendar.getByRole("list", {
+    name: "Workouts logged this month",
+  });
+  await expect(legend.getByText(workout, { exact: true })).toBeVisible();
+  await calendar.getByRole("button", { name: "Next month" }).click();
+  await expect(legend.getByText(workout, { exact: true })).toHaveCount(0);
+  await calendar.getByRole("button", { name: "Previous month" }).click();
+  await expect(legend.getByText(workout, { exact: true })).toBeVisible();
+  await expect(
+    page
+      .getByRole("region", { name: "Most recent workout" })
+      .getByText(workout, { exact: true }),
+  ).toBeVisible();
   await page
     .getByRole("button", { name: `Edit ${exercise}`, exact: true })
     .click();
@@ -85,6 +108,15 @@ test("create, prescribe, arrange, log, and revisit a workout on desktop and mobi
     .getByRole("button", { name: "Save prescription", exact: true })
     .click();
   await expect(dialog).not.toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: `test-results/${testInfo.project.name}-journal.png`,
+    fullPage: true,
+  });
   await page
     .getByRole("button", { name: "Session history", exact: true })
     .click();

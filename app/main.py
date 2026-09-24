@@ -32,7 +32,7 @@ from app.services import (
 st.set_page_config(page_title="ProgreSQL", page_icon="💪", layout="wide")
 
 AUTH_SESSION_TIMEOUT = timedelta(hours=1)
-APP_VERSION = "2.0.2"
+APP_VERSION = "2.1.0"
 
 
 def require_authorized_user() -> None:

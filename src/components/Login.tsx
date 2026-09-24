@@ -88,7 +88,6 @@ export function Login({
                 autoComplete="username"
                 required
                 maxLength={200}
-                autoFocus
               />
               <Field
                 label="Password"
