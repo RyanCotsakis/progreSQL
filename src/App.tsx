@@ -23,7 +23,6 @@ import {
   Pencil,
   Plus,
   Search,
-  ShieldCheck,
   Trash2,
   TrendingUp,
 } from "lucide-react";
@@ -224,7 +223,7 @@ export default function App() {
             ProgreSQL<span className="text-primary">.</span>
           </span>
         </a>
-        <p className="eyebrow mb-3 hidden px-7 lg:block">Your training space</p>
+        <p className="eyebrow mb-3 hidden px-7 lg:block">Navigation</p>
         <nav
           aria-label="Main navigation"
           className="flex gap-1 overflow-x-auto px-3 pb-3 lg:flex-col lg:px-4"
@@ -247,15 +246,6 @@ export default function App() {
           ))}
         </nav>
         <div className="absolute bottom-6 hidden w-full px-5 lg:block">
-          <div className="rounded-xl border bg-muted/40 p-4">
-            <div className="mb-2 flex items-center gap-2 text-sm font-medium">
-              <ShieldCheck size={16} className="text-primary" /> A space for
-              your progress
-            </div>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              One session at a time. Every workout counts.
-            </p>
-          </div>
           <a
             href="#"
             onClick={(event) => {
@@ -270,11 +260,8 @@ export default function App() {
       </aside>
       <div className="min-w-0 lg:col-start-2">
         <header className="flex h-16 items-center justify-between border-b px-5 sm:px-10">
-          <span className="text-sm text-muted-foreground">
-            Personal workspace <span className="mx-2 text-border">/</span>{" "}
-            <span className="text-foreground">
-              {nav.find((n) => n.id === page)?.label}
-            </span>
+          <span className="text-sm text-foreground">
+            {nav.find((n) => n.id === page)?.label}
           </span>
           <span className="hidden items-center gap-2 text-xs text-muted-foreground sm:flex">
             <span className="size-1.5 rounded-full bg-primary" />
@@ -331,8 +318,7 @@ export default function App() {
           }
         </main>
         <footer className="mx-auto flex max-w-[1300px] justify-between px-5 py-6 text-xs text-muted-foreground sm:px-10">
-          <span>Built for steady progress.</span>
-          <span>ProgreSQL · 2.0</span>
+          <span>ProgreSQL · 2.0.1</span>
         </footer>
       </div>
       {((error && data) || notice) && (
@@ -369,6 +355,11 @@ export default function App() {
                   ? "Edit workout"
                   : "New workout"
                 : "Session details"
+          }
+          description={
+            modal.type === "session"
+              ? "View this session's exercises, prescriptions, and notes."
+              : undefined
           }
           onClose={() => {
             if (!saving) setModal(null);
@@ -630,9 +621,9 @@ function Journal({
   return (
     <>
       <Heading
-        eyebrow="Show up. Build momentum."
+        eyebrow="Overview"
         title="Your workout journal"
-        description="Plan your training, log a session, and see how far you’ve come."
+        description="Log workouts and review your sessions."
       />
       <div className="mb-8 grid grid-cols-3 gap-2 sm:gap-4">
         {[
@@ -645,13 +636,13 @@ function Journal({
           {
             title: "Total sessions",
             value: data.sessions.length,
-            suffix: "moments of progress",
+            suffix: "sessions logged",
             icon: TrendingUp,
           },
           {
             title: "Your workouts",
             value: active.length,
-            suffix: "ready when you are",
+            suffix: "active workouts",
             icon: Dumbbell,
           },
         ].map((stat) => (
@@ -761,10 +752,9 @@ function Journal({
           ) : (
             <div className="py-8 text-center">
               <Dumbbell size={36} className="mx-auto mb-4 text-primary/50" />
-              <h3 className="font-semibold">Your first session starts here</h3>
+              <h3 className="font-semibold">No workouts available</h3>
               <p className="mx-auto my-3 max-w-sm text-sm text-muted-foreground">
-                Create a workout, add your exercises, and start building your
-                history.
+                Create a workout and add exercises before logging a session.
               </p>
               <Button onClick={() => open({ type: "workout" })}>
                 <Plus /> Create a workout
@@ -780,7 +770,7 @@ function Journal({
               <SessionList data={data} sessions={logged} open={open} />
             ) : (
               <p className="text-sm text-muted-foreground">
-                A fresh page. No sessions logged yet.
+                No sessions logged for this date.
               </p>
             )}
           </Card>
@@ -810,9 +800,9 @@ function Library({
   return (
     <>
       <Heading
-        eyebrow="Make it your own"
+        eyebrow="Library"
         title="Your training library"
-        description="Workouts that fit your routine. Prescriptions that grow with you."
+        description="Manage exercises, workouts, and dated prescriptions."
       >
         <Button onClick={() => open({ type: "workout" })}>
           <Plus /> New workout
@@ -1541,7 +1531,7 @@ function HistoryPage({
   return (
     <>
       <Heading
-        eyebrow="Every session adds up"
+        eyebrow="History"
         title="Your training history"
         description="Revisit your sessions with the exercises and prescriptions that applied on the day."
       />
@@ -1743,7 +1733,7 @@ function Admin({
   return (
     <>
       <Heading
-        eyebrow="Behind your journal"
+        eyebrow="Administration"
         title="Data manager"
         description="Inspect, export, and maintain your workout records."
       >

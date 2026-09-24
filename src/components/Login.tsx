@@ -73,7 +73,7 @@ export function Login({
             Welcome back
           </h1>
           <p className="mb-6 mt-2 text-sm text-muted-foreground">
-            Your training, your progress. Sign in to your private journal.
+            Sign in to your workout journal.
           </p>
           {loading ? (
             <div className="flex items-center gap-3 py-8 text-sm text-muted-foreground">
@@ -125,9 +125,6 @@ export function Login({
             </form>
           )}
         </Card>
-        <p className="mt-6 text-center text-xs text-muted-foreground">
-          One session at a time. Every workout counts.
-        </p>
       </div>
     </main>
   );
