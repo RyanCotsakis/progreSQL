@@ -6,3 +6,13 @@ gym.db
 *.db-journal
 .streamlit/secrets.toml
 .streamlit/authenticator-setup.png
+node_modules/
+.npm-cache/
+dist/
+.wrangler/
+.dev.vars*
+.env*
+*.tsbuildinfo
+exports/
+test-results/
+playwright-report/

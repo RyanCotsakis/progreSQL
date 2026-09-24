@@ -1,77 +1,88 @@
-# ProgreSQL 💪
+# ProgreSQL
 
-A deliberately small, single-user Streamlit app for logging that you completed a workout and keeping an auditable history of each exercise's prescribed weight, maximum reps, and sets. It does not track individual sets, actual repetitions, or RPE.
+A private workout journal built with React, TypeScript, Tailwind/shadcn-style UI components, Cloudflare Workers, and D1. The deployed app has no Streamlit or Python dependency.
 
-## Architecture
+## Run locally
 
-SQLite is accessed through SQLAlchemy. Alembic owns the database schema; the application never calls `create_all` at runtime. The small service layer in `app/services.py` owns all state changes and transactions.
+Requires Node.js 22.12+ (Node 24 recommended).
 
-## Public cloud deployment
+```powershell
+npm ci
+npm run build
+npm run db:migrate
+npm run dev
+```
 
-The deployed app uses a private username, Argon2 password hash, and TOTP code
-from Microsoft Authenticator. It uses hosted PostgreSQL instead of the
-ephemeral filesystem on Streamlit Community Cloud. See
-`.streamlit/secrets.toml.example` for the required secrets; the real secrets
-file is ignored by Git.
+Open http://127.0.0.1:5173. The UI uses Vite, and the API runs on port 8787. Local authentication is bypassed only when the explicit development flag is enabled and the request uses a loopback hostname. Production requires the existing username, password, and Authenticator code. To test that login locally, prepare the credentials as described in the deployment guide, then run Wrangler without the `LOCAL_DEV` flag.
 
-Before deploying:
+For a preview of the production bundle, run `npm run preview` and open http://127.0.0.1:8787.
 
-1. Create a PostgreSQL database and save its SQLAlchemy URL as `database_url`.
-2. Run `uv run python scripts/setup_local_auth.py`, scan the generated QR code
-   with Microsoft Authenticator, and paste the printed secrets into your local
-   `.streamlit/secrets.toml` file.
-3. Put the database URL and three generated authentication secrets into
-   Streamlit Community Cloud's Secrets settings.
-4. Run the migrations against PostgreSQL once before first use (PowerShell):
-   `$env:DATABASE_URL = 'postgresql+psycopg://...'; uv run alembic upgrade head`
+## Features
 
-Do not store `gym.db` in the public repository or rely on it for deployed
-data. Keep periodic PostgreSQL backups from your database provider.
+- Calendar, session logging, notes, historical session details, and session deletion.
+- Exercise library, prescribed weights/reps/sets, dated changes, and weight progression.
+- Workouts with dated exercise membership and ordering.
+- Archiving that preserves history and prevents archiving exercises still in active workouts.
+- Table editor, administrative inserts, and a JSON data export.
+- Responsive layouts, keyboard-accessible dialogs, loading states, and validation feedback.
 
-| Table | Purpose |
+Only workout completion and prescribed settings are tracked. Individual performed sets, actual repetitions, and RPE are not tracked.
+
+## Preserve historical behavior
+
+The TypeScript service in `worker/service.ts` ports the rules from `app/services.py`. Both prescriptions and workout composition use inclusive start dates and exclusive end dates. Backdated edits split periods; future changes do not apply early; same-day corrections intentionally update sessions on that day. Multi-statement changes use atomic D1 batches. The original Python tests remain the reference implementation.
+
+## Migrate PostgreSQL data
+
+```powershell
+.venv/Scripts/python.exe scripts/export_to_d1.py
+```
+
+The exporter reads `DATABASE_URL`, falling back to `database_url` in your local `.streamlit/secrets.toml`. PostgreSQL is opened in a read-only, repeatable-read transaction. It writes a new ignored `exports/<timestamp>/` directory containing:
+
+- `snapshot.sqlite`: all five tables with preserved primary keys, relationships, and timestamps.
+- `import.sql`: SQLite-compatible inserts for D1, guarded against importing into a populated database.
+- `manifest.json`: row counts and the import file checksum.
+
+It verifies row counts, foreign keys, SQLite integrity, and replay of the exact SQL file. Credentials and row contents are never printed. Existing export directories are never overwritten.
+
+Apply the schema first, then import into an empty local database:
+
+```powershell
+npm run db:migrate
+npx wrangler d1 execute progresql --local --file exports/<timestamp>/import.sql
+```
+
+Do not commit snapshots or SQL exports. For production migration and authentication setup, see [Cloudflare deployment](docs/deployment.md).
+
+## Verify changes
+
+```powershell
+npm run build
+npm test
+npm run test:browser
+.venv/Scripts/python.exe -m pytest
+```
+
+Browser tests require `npx playwright install chromium`, or on Windows use the installed Edge browser:
+
+```powershell
+$env:PW_CHROMIUM_CHANNEL = 'msedge'
+npm run test:browser
+```
+
+Browser tests use an isolated local D1 database under `.wrangler/e2e`, never the live database. `npm test` covers temporal behavior, transaction rollback, concurrency, constraints, API validation, password verification, TOTP replay prevention, session expiry/revocation, CSRF protection, and login throttling. `npm run format` formats the TypeScript application.
+
+## Project layout
+
+| Path | Purpose |
 | --- | --- |
-| `exercise` | Stable exercise identity and metadata. |
-| `workout` / `workout_exercise` | A reusable workout definition with effective-dated exercise membership and order. |
-| `workout_session` | The fact that a workout was performed on a date. |
-| `exercise_settings_history` | Time-bounded weight / max-reps / sets prescriptions. |
+| `src/` | React UI and reusable shadcn-style/Radix components |
+| `shared/` | Types, validation schemas, and date resolution |
+| `worker/` | Password/TOTP authentication and D1 API |
+| `migrations/` | D1 schema migrations |
+| `scripts/export_to_d1.py` | Read-only PostgreSQL migration exporter |
+| `tests-web/` | D1, authentication, and browser tests |
+| `app/`, `alembic/`, `tests/` | Preserved Python reference and rollback path |
 
-Exercise identity is separate from state because its prescription changes over time. Settings use SCD Type 2 periods: adding a state closes the row covering its effective date and inserts a new row. Workout exercise membership and ordering use the same date-range approach. A workout session stores only a workout and date; when it is displayed, the app resolves both its exercise list and each exercise's state using `effective_from <= date < effective_to` (or no end date). This means old workouts always show the configuration that applied at the time, while a change made effective on a session's date is reflected in that session.
-
-Future-dated changes are supported: the old state remains applicable until the new state's effective date.
-
-## Local setup
-
-This project uses [uv](https://docs.astral.sh/uv/). Install uv if it is not already available, then run:
-
-```powershell
-uv sync
-uv run alembic upgrade head
-uv run streamlit run app/main.py
-```
-
-The first command creates `.venv` and installs Streamlit, SQLAlchemy, Alembic, and pytest. The migration creates the local `gym.db` file.
-
-Run the test suite with:
-
-```powershell
-uv run pytest
-```
-
-## Reset the local database
-
-To discard all local workout data and recreate an empty database from the
-migrations, run:
-
-```powershell
-Remove-Item .\gym.db
-uv run alembic upgrade head
-```
-
-## Everyday workflow
-
-1. Create exercises and add their initial state.
-2. Create workouts and arrange their exercises.
-3. Select a workout and date, then press **Log Workout**.
-4. When your prescription changes, use **Change exercise state** with the effective date.
-
-Normal UI flows intentionally do not delete exercises or workouts, protecting the history referenced by logged sessions.
+The old app remains available for rollback until the production migration is accepted. Its setup instructions are in [Legacy Streamlit](docs/legacy-streamlit.md).

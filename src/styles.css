@@ -1,0 +1,83 @@
+@import "tailwindcss";
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-primary: var(--primary);
+  --color-primary-foreground: #fff;
+  --color-muted: #f1f4f3;
+  --color-muted-foreground: #64736c;
+  --color-border: #e2e8e4;
+  --color-input: #dce4df;
+  --color-ring: #238262;
+  --color-destructive: #b83f42;
+  --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
+}
+:root {
+  --background: #fcfdfc;
+  --foreground: #1a2c23;
+  --card: #fff;
+  --primary: #176b4f;
+  color-scheme: light;
+}
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply m-0 bg-background text-foreground antialiased;
+  }
+  button,
+  a,
+  input,
+  select,
+  textarea {
+    -webkit-tap-highlight-color: transparent;
+  }
+  button:not(:disabled),
+  select {
+    cursor: pointer;
+  }
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-ring;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+}
+@layer components {
+  .field {
+    @apply flex min-h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-xs outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/15 disabled:opacity-50;
+  }
+  .eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-[0.15em] text-muted-foreground;
+  }
+  .page-title {
+    @apply text-3xl font-semibold tracking-tight sm:text-4xl;
+  }
+  .table-wrap {
+    @apply w-full overflow-x-auto;
+  }
+  .data-table {
+    @apply w-full text-left text-sm;
+  }
+  .data-table th {
+    @apply whitespace-nowrap border-b px-3 py-3 text-xs font-medium text-muted-foreground;
+  }
+  .data-table td {
+    @apply border-b px-3 py-3.5;
+  }
+  .data-table tr:last-child td {
+    @apply border-0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
