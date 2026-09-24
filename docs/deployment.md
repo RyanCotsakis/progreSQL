@@ -11,6 +11,8 @@ Target: **progresql.cotsakis.com**, using Workers Free and D1 Free. The app keep
 
 The original PostgreSQL source and Streamlit app are retained for rollback. Public `workers.dev` and preview URLs are disabled. Never enable `LOCAL_DEV` in production.
 
+The Worker runs before static assets and redirects HTTP requests to HTTPS before serving the login form or processing authentication. HTTPS responses include HSTS. This is required for browsers to retain the Secure session cookie; loopback development remains available over HTTP.
+
 ## Verified deployment
 
 Deployed on 24 September 2026 as Worker version `fbf833f2-43f2-498c-af12-50db67c795d8`. The read-only source export at `exports/20260924-205437/` matched the earlier imported snapshot exactly. All 109 application rows were compared against the live authenticated API: 16 exercises, 3 workouts, 41 prescriptions, 31 memberships, and 18 sessions. D1 foreign-key checks passed.

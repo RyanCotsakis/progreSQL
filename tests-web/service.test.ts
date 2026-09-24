@@ -400,6 +400,58 @@ describe("API security and validation", () => {
 });
 
 const testSecret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+describe("HTTPS session transport", () => {
+  it("redirects the login page, assets, and API to HTTPS before processing", async () => {
+    const env = await authEnv();
+    for (const path of [
+      "/",
+      "/assets/app.js",
+      "/api/auth/login?return=journal",
+    ]) {
+      const response = await worker.fetch(
+        new Request(`http://progresql.cotsakis.com${path}`),
+        env,
+      );
+      expect(response.status).toBe(308);
+      expect(response.headers.get("Location")).toBe(
+        `https://progresql.cotsakis.com${path}`,
+      );
+      expect(response.headers.has("Set-Cookie")).toBe(false);
+    }
+    expect(
+      (
+        await db
+          .prepare("SELECT COUNT(*) AS n FROM auth_rate_limit")
+          .first<{ n: number }>()
+      )?.n,
+    ).toBe(0);
+  });
+  it("adds HSTS to HTTPS pages and API responses without redirecting", async () => {
+    const env = await authEnv();
+    Object.assign(env, {
+      ASSETS: { fetch: async () => new Response("login page") },
+    });
+    for (const path of ["/", "/api/auth/config"]) {
+      const response = await worker.fetch(
+        new Request(`https://progresql.cotsakis.com${path}`),
+        env,
+      );
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Strict-Transport-Security")).toBe(
+        "max-age=31536000",
+      );
+      expect(response.headers.has("Location")).toBe(false);
+    }
+  });
+  it("keeps loopback development available over HTTP", async () => {
+    const response = await worker.fetch(
+      new Request("http://127.0.0.1:8788/api/auth/config"),
+      await authEnv(),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.has("Strict-Transport-Security")).toBe(false);
+  });
+});
 const proof = "ab".repeat(32);
 async function authEnv(): Promise<AuthEnv> {
   const pepper = "test-only-pepper-with-at-least-32-characters";

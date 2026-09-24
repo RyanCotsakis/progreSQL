@@ -5,6 +5,7 @@ import {
   login,
   logout,
   parameters,
+  isLoopback,
   type Env,
 } from "./auth";
 import { mutate, readData, ValidationError } from "./service";
@@ -39,7 +40,7 @@ async function readLimitedBody(request: Request): Promise<string | null> {
     reader.releaseLock();
   }
 }
-export default {
+const app = {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
@@ -158,5 +159,23 @@ export default {
         500,
       );
     }
+  },
+} satisfies ExportedHandler<Env>;
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+    const local = isLoopback(request);
+    // Run before assets and authentication: a Secure session cookie cannot be
+    // stored by a browser visiting the login form over plain HTTP.
+    if (!local && url.protocol === "http:") {
+      url.protocol = "https:";
+      return Response.redirect(url.toString(), 308);
+    }
+    const response = await app.fetch(request, env);
+    if (local) return response;
+    const secured = new Response(response.body, response);
+    secured.headers.set("Strict-Transport-Security", "max-age=31536000");
+    return secured;
   },
 } satisfies ExportedHandler<Env>;
