@@ -318,7 +318,7 @@ export default function App() {
           }
         </main>
         <footer className="mx-auto flex max-w-[1300px] justify-between px-5 py-6 text-xs text-muted-foreground sm:px-10">
-          <span>ProgreSQL · 2.0.1</span>
+          <span>ProgreSQL · 2.0.2</span>
         </footer>
       </div>
       {((error && data) || notice) && (
@@ -969,7 +969,7 @@ function StateInputs({ state }: { state?: Prescription }) {
           type="number"
           min="0"
           max="99999.99"
-          step="0.01"
+          step="2.5"
           required
           defaultValue={state?.weight ?? 0}
         />
@@ -1803,7 +1803,7 @@ function Admin({
                             aria-label={`${column} row ${id}`}
                             className="min-w-36"
                             type={numeric.has(column) ? "number" : "text"}
-                            step={column === "weight" ? "0.01" : "1"}
+                            step={column === "weight" ? "2.5" : "1"}
                             value={(changes[id] || row)[column] ?? ""}
                             onChange={(e) => {
                               setConfirm(false);
