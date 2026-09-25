@@ -1,7 +1,7 @@
 {
   "name": "progresql",
   "private": true,
-  "version": "2.1.1",
+  "version": "2.1.2",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n ui,api \"vite --host 127.0.0.1\" \"wrangler dev --ip 127.0.0.1 --local-upstream 127.0.0.1 --upstream-protocol http --port 8787 --var LOCAL_DEV:enabled\"",

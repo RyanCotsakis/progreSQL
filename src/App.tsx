@@ -325,7 +325,7 @@ export default function App() {
           }
         </main>
         <footer className="mx-auto flex max-w-[1300px] justify-between px-5 py-6 text-xs text-muted-foreground sm:px-10">
-          <span>ProgreSQL · 2.1.1</span>
+          <span>ProgreSQL · 2.1.2</span>
         </footer>
       </div>
       {((error && data) || notice) && (
@@ -1052,12 +1052,13 @@ function StateInputs({ state }: { state?: Prescription }) {
   const [effectiveDay, setEffectiveDay] = useState(localDay());
   return (
     <>
-      <div className="flex items-end gap-1">
-        <div className="min-w-0 flex-1">
+      <div className="grid grid-cols-[minmax(0,10rem)_2.5rem_2.5rem] items-end gap-2 sm:grid-cols-[minmax(0,1fr)_2.5rem_2.5rem]">
+        <div className="min-w-0">
           <Field
             label="Effective from"
             name="effective_from"
             type="date"
+            className="max-w-full appearance-none"
             required
             value={effectiveDay}
             onChange={(event) => setEffectiveDay(event.target.value)}

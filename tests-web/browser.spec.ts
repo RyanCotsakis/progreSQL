@@ -126,6 +126,30 @@ test("create, prescribe, arrange, log, and revisit a workout on desktop and mobi
     .getByRole("button", { name: `Edit ${exercise}`, exact: true })
     .click();
   await dialog.getByLabel("Effective from", { exact: true }).fill("2026-03-01");
+  if (testInfo.project.name === "mobile") {
+    const originalViewport = page.viewportSize()!;
+    for (const width of [320, 375, 414]) {
+      await page.setViewportSize({ width, height: originalViewport.height });
+      const dateBox = (await dialog
+        .getByLabel("Effective from", { exact: true })
+        .boundingBox())!;
+      const previous = (await dialog
+        .getByRole("button", { name: "Previous effective day" })
+        .boundingBox())!;
+      const next = (await dialog
+        .getByRole("button", { name: "Next effective day" })
+        .boundingBox())!;
+      const panel = (await dialog.boundingBox())!;
+      expect(dateBox.x + dateBox.width + 4).toBeLessThanOrEqual(previous.x);
+      expect(previous.x + previous.width + 4).toBeLessThanOrEqual(next.x);
+      expect(next.x + next.width).toBeLessThanOrEqual(panel.x + panel.width);
+    }
+    await page.screenshot({
+      path: "test-results/mobile-prescription.png",
+      fullPage: true,
+    });
+    await page.setViewportSize(originalViewport);
+  }
   await dialog.getByRole("button", { name: "Next effective day" }).click();
   await expect(
     dialog.getByLabel("Effective from", { exact: true }),
