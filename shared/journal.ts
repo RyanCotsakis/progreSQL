@@ -1,7 +1,9 @@
 import type { WorkoutSession } from "./model";
 
 export function relativeDay(daysAgo: number) {
-  if (daysAgo === 0) return "Today · 0 days ago";
+  if (daysAgo === 0) return "Today";
+  if (daysAgo === 1) return "Yesterday";
+  if (daysAgo === -1) return "Tomorrow";
   const count = Math.abs(daysAgo);
   const unit = count === 1 ? "day" : "days";
   return daysAgo < 0 ? `in ${count} ${unit}` : `${count} ${unit} ago`;

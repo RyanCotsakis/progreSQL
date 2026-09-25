@@ -15,10 +15,11 @@ const session = (workout_id: number, workout_date: string): WorkoutSession => ({
   created_at: workout_date,
 });
 describe("journal summaries", () => {
-  it("uses singular day for tomorrow and yesterday", () => {
-    expect(relativeDay(-1)).toBe("in 1 day");
+  it("labels yesterday, today and tomorrow", () => {
+    expect(relativeDay(0)).toBe("Today");
+    expect(relativeDay(-1)).toBe("Tomorrow");
     expect(relativeDay(-2)).toBe("in 2 days");
-    expect(relativeDay(1)).toBe("1 day ago");
+    expect(relativeDay(1)).toBe("Yesterday");
     expect(relativeDay(2)).toBe("2 days ago");
   });
   it("moves prescription dates across month, year and leap-day boundaries", () => {

@@ -325,7 +325,7 @@ export default function App() {
           }
         </main>
         <footer className="mx-auto flex max-w-[1300px] justify-between px-5 py-6 text-xs text-muted-foreground sm:px-10">
-          <span>ProgreSQL · 2.1.2</span>
+          <span>ProgreSQL · 2.1.3</span>
         </footer>
       </div>
       {((error && data) || notice) && (
@@ -977,7 +977,7 @@ function Library({
                   <th>Muscle group</th>
                   <th>Weight</th>
                   <th>Max reps × sets</th>
-                  <th>
+                  <th className="relative">
                     <span className="sr-only">Edit</span>
                   </th>
                 </tr>
@@ -1092,7 +1092,8 @@ function StateInputs({ state }: { state?: Prescription }) {
           type="number"
           min="0"
           max="99999.99"
-          step="2.5"
+          step="any"
+          increment={2.5}
           required
           defaultValue={state?.weight ?? 0}
         />
@@ -1960,16 +1961,17 @@ function Admin({
                             aria-label={`${column} row ${id}`}
                             className="min-w-36"
                             type={numeric.has(column) ? "number" : "text"}
-                            step={column === "weight" ? "2.5" : "1"}
+                            step={column === "weight" ? "any" : "1"}
+                            increment={column === "weight" ? 2.5 : undefined}
                             value={(changes[id] || row)[column] ?? ""}
-                            onChange={(e) => {
+                            onValueChange={(inputValue) => {
                               setConfirm(false);
                               const value =
-                                e.target.value === ""
+                                inputValue === ""
                                   ? null
                                   : numeric.has(column)
-                                    ? Number(e.target.value)
-                                    : e.target.value;
+                                    ? Number(inputValue)
+                                    : inputValue;
                               setChanges({
                                 ...changes,
                                 [id]: {

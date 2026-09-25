@@ -45,7 +45,7 @@ test("create, prescribe, arrange, log, and revisit a workout on desktop and mobi
   await dialog.getByLabel("Muscle group", { exact: true }).fill("Chest");
   await dialog.getByLabel("Equipment", { exact: true }).fill("Barbell");
   await dialog.getByLabel("Effective from", { exact: true }).fill("2026-01-01");
-  await dialog.getByLabel("Weight (kg)", { exact: true }).fill("60");
+  await dialog.getByLabel("Weight (kg)", { exact: true }).fill("60.125");
   await dialog
     .getByRole("button", { name: "Create exercise", exact: true })
     .click();
@@ -60,10 +60,14 @@ test("create, prescribe, arrange, log, and revisit a workout on desktop and mobi
       (el) => getComputedStyle(el).textDecorationLine,
     ),
   ).toContain("underline");
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(page.viewportSize()!.width);
   await exerciseLink.click();
   await expect(
     dialog.getByRole("heading", { name: exercise, exact: true }),
   ).toBeVisible();
+
   await dialog.getByRole("button", { name: "Close dialog" }).click();
   await page.getByRole("button", { name: "New workout", exact: true }).click();
   await dialog.getByLabel("Workout name", { exact: true }).fill(workout);
@@ -99,7 +103,7 @@ test("create, prescribe, arrange, log, and revisit a workout on desktop and mobi
     .getByLabel("Choose a workout", { exact: true })
     .selectOption({ label: workout });
   await expect(
-    page.getByRole("cell", { name: "60 kg", exact: true }),
+    page.getByRole("cell", { name: "60.125 kg", exact: true }),
   ).toBeVisible();
   await page
     .getByLabel("Session notes", { exact: false })
@@ -158,7 +162,20 @@ test("create, prescribe, arrange, log, and revisit a workout on desktop and mobi
   await expect(
     dialog.getByLabel("Effective from", { exact: true }),
   ).toHaveValue("2026-03-01");
-  await dialog.getByLabel("Weight (kg)", { exact: true }).fill("65");
+  const weight = dialog.getByLabel("Weight (kg)", { exact: true });
+  await weight.fill("63.125");
+  await dialog
+    .getByRole("button", { name: "Increase weight by 2.5 kg", exact: true })
+    .click();
+  await expect(weight).toHaveValue("65.625");
+  await dialog
+    .getByRole("button", { name: "Decrease weight by 2.5 kg", exact: true })
+    .click();
+  await expect(weight).toHaveValue("63.125");
+  await weight.press("ArrowUp");
+  await expect(weight).toHaveValue("65.625");
+  await weight.press("ArrowDown");
+  await expect(weight).toHaveValue("63.125");
   await dialog
     .getByRole("button", { name: "Save prescription", exact: true })
     .click();
@@ -180,7 +197,7 @@ test("create, prescribe, arrange, log, and revisit a workout on desktop and mobi
     .selectOption({ label: workout });
   await page.getByRole("button", { name: new RegExp(workout) }).click();
   await expect(
-    dialog.getByRole("cell", { name: "60 kg", exact: true }),
+    dialog.getByRole("cell", { name: "60.125 kg", exact: true }),
   ).toBeVisible();
   await expect(
     dialog.getByText("Browser test session", { exact: true }),
