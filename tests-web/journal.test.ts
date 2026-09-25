@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { daysBetween, latestWorkouts, monthSessions } from "../shared/journal";
+import {
+  daysBetween,
+  latestWorkouts,
+  monthSessions,
+  relativeDay,
+  shiftDay,
+} from "../shared/journal";
 import type { WorkoutSession } from "../shared/model";
 const session = (workout_id: number, workout_date: string): WorkoutSession => ({
   workout_id,
@@ -9,6 +15,18 @@ const session = (workout_id: number, workout_date: string): WorkoutSession => ({
   created_at: workout_date,
 });
 describe("journal summaries", () => {
+  it("uses singular day for tomorrow and yesterday", () => {
+    expect(relativeDay(-1)).toBe("in 1 day");
+    expect(relativeDay(-2)).toBe("in 2 days");
+    expect(relativeDay(1)).toBe("1 day ago");
+    expect(relativeDay(2)).toBe("2 days ago");
+  });
+  it("moves prescription dates across month, year and leap-day boundaries", () => {
+    expect(shiftDay("2026-01-01", -1)).toBe("2025-12-31");
+    expect(shiftDay("2026-01-31", 1)).toBe("2026-02-01");
+    expect(shiftDay("2024-02-28", 1)).toBe("2024-02-29");
+    expect(shiftDay("2026-03-29", 1)).toBe("2026-03-30");
+  });
   it("includes every workout on the newest date regardless of input order", () => {
     expect(
       latestWorkouts(

@@ -1,4 +1,6 @@
 import {
+  relativeDay,
+  shiftDay,
   latestWorkouts,
   monthSessions,
   workoutColour,
@@ -323,7 +325,7 @@ export default function App() {
           }
         </main>
         <footer className="mx-auto flex max-w-[1300px] justify-between px-5 py-6 text-xs text-muted-foreground sm:px-10">
-          <span>ProgreSQL · 2.1.0</span>
+          <span>ProgreSQL · 2.1.1</span>
         </footer>
       </div>
       {((error && data) || notice) && (
@@ -716,14 +718,7 @@ function Journal({
                   <time dateTime={latest.date}>{fmt(latest.date)}</time>
                   <span className="text-muted-foreground">
                     {" "}
-                    ·{" "}
-                    {latest.daysAgo === 0
-                      ? "Today · 0 days ago"
-                      : latest.daysAgo === 1
-                        ? "1 day ago"
-                        : latest.daysAgo < 0
-                          ? `In ${-latest.daysAgo} days`
-                          : `${latest.daysAgo} days ago`}
+                    · {relativeDay(latest.daysAgo)}
                   </span>
                 </p>
                 <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
@@ -759,15 +754,27 @@ function Journal({
                 {fmt(day, { weekday: "long", day: "numeric", month: "long" })}
               </h2>
             </div>
-            <Input
-              aria-label="Workout date"
-              type="date"
-              value={day}
-              onChange={(e) => {
-                if (e.target.value) setDay(e.target.value);
-              }}
-              className="w-auto"
-            />
+            <div className="flex min-w-0 items-center gap-1">
+              <Input
+                aria-label="Workout date"
+                type="date"
+                value={day}
+                onChange={(e) => {
+                  if (e.target.value) setDay(e.target.value);
+                }}
+                className="w-auto"
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="px-2 text-xs text-muted-foreground"
+                aria-label="Set session date to today"
+                onClick={() => setDay(localDay())}
+              >
+                Today
+              </Button>
+            </div>
           </div>
           {active.length ? (
             <>
@@ -982,7 +989,7 @@ function Library({
                     <tr key={e.exercise_id}>
                       <td>
                         <button
-                          className="text-left font-medium hover:text-primary hover:underline"
+                          className="text-left font-medium text-primary underline decoration-primary/30 underline-offset-4 hover:decoration-primary"
                           onClick={() =>
                             open({ type: "exercise", id: e.exercise_id })
                           }
@@ -1042,15 +1049,41 @@ function Save({
   );
 }
 function StateInputs({ state }: { state?: Prescription }) {
+  const [effectiveDay, setEffectiveDay] = useState(localDay());
   return (
     <>
-      <Field
-        label="Effective from"
-        name="effective_from"
-        type="date"
-        required
-        defaultValue={localDay()}
-      />
+      <div className="flex items-end gap-1">
+        <div className="min-w-0 flex-1">
+          <Field
+            label="Effective from"
+            name="effective_from"
+            type="date"
+            required
+            value={effectiveDay}
+            onChange={(event) => setEffectiveDay(event.target.value)}
+          />
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label="Previous effective day"
+          disabled={!effectiveDay || effectiveDay <= "0001-01-01"}
+          onClick={() => setEffectiveDay(shiftDay(effectiveDay, -1))}
+        >
+          <ChevronLeft />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label="Next effective day"
+          disabled={!effectiveDay || effectiveDay >= "9999-12-31"}
+          onClick={() => setEffectiveDay(shiftDay(effectiveDay, 1))}
+        >
+          <ChevronRight />
+        </Button>
+      </div>
       <div className="grid grid-cols-3 gap-3">
         <Field
           label="Weight (kg)"
@@ -1171,6 +1204,18 @@ function ExerciseEditor({
   saving: boolean;
   close: () => void;
 }) {
+  const today = localDay();
+  const workouts = exercise
+    ? data.workouts
+        .filter(
+          (workout) =>
+            workout.is_active &&
+            membersFor(data, workout.workout_id, today).some(
+              (member) => member.exercise_id === exercise.exercise_id,
+            ),
+        )
+        .sort((a, b) => a.workout_name.localeCompare(b.workout_name))
+    : [];
   const history = data.prescriptions
     .filter((p) => p.exercise_id === exercise?.exercise_id)
     .sort((a, b) => a.effective_from.localeCompare(b.effective_from));
@@ -1182,6 +1227,28 @@ function ExerciseEditor({
       {exercise && (
         <>
           <h3 className="text-lg font-semibold">{exercise.exercise_name}</h3>
+          <section
+            aria-label="Exercise workouts"
+            className="rounded-lg border bg-muted/30 p-4"
+          >
+            <h4 className="text-sm font-semibold">Workouts</h4>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Active memberships as of {fmt(today)}.
+            </p>
+            {workouts.length ? (
+              <ul className="mt-3 space-y-1 text-sm">
+                {workouts.map((workout) => (
+                  <li key={workout.workout_id} className="break-words">
+                    {workout.workout_name}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-sm text-muted-foreground">
+                Not part of any active workouts.
+              </p>
+            )}
+          </section>
           <Progression history={history} data={data} />
           <details>
             <summary className="cursor-pointer text-sm font-medium">

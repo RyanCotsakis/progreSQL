@@ -1,5 +1,18 @@
 import type { WorkoutSession } from "./model";
 
+export function relativeDay(daysAgo: number) {
+  if (daysAgo === 0) return "Today · 0 days ago";
+  const count = Math.abs(daysAgo);
+  const unit = count === 1 ? "day" : "days";
+  return daysAgo < 0 ? `in ${count} ${unit}` : `${count} ${unit} ago`;
+}
+
+export function shiftDay(day: string, amount: number) {
+  const date = new Date(day + "T12:00:00Z");
+  date.setUTCDate(date.getUTCDate() + amount);
+  return date.toISOString().slice(0, 10);
+}
+
 // UTC calendar dates avoid 23/25-hour daylight-saving days changing the count.
 export function daysBetween(earlier: string, later: string) {
   return Math.round(

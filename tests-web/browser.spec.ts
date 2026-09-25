@@ -1,3 +1,4 @@
+import { localDay } from "../shared/model";
 import { totpAt } from "../worker/auth";
 import { expect, test } from "@playwright/test";
 
@@ -49,6 +50,21 @@ test("create, prescribe, arrange, log, and revisit a workout on desktop and mobi
     .getByRole("button", { name: "Create exercise", exact: true })
     .click();
   await expect(dialog).not.toBeVisible();
+  const exerciseLink = page.getByRole("button", {
+    name: exercise,
+    exact: true,
+  });
+  await expect(exerciseLink).toBeVisible();
+  expect(
+    await exerciseLink.evaluate(
+      (el) => getComputedStyle(el).textDecorationLine,
+    ),
+  ).toContain("underline");
+  await exerciseLink.click();
+  await expect(
+    dialog.getByRole("heading", { name: exercise, exact: true }),
+  ).toBeVisible();
+  await dialog.getByRole("button", { name: "Close dialog" }).click();
   await page.getByRole("button", { name: "New workout", exact: true }).click();
   await dialog.getByLabel("Workout name", { exact: true }).fill(workout);
   await dialog
@@ -71,6 +87,13 @@ test("create, prescribe, arrange, log, and revisit a workout on desktop and mobi
   await page
     .getByRole("button", { name: "Workout journal", exact: true })
     .click();
+  await page.getByLabel("Workout date", { exact: true }).fill("2026-01-15");
+  await page
+    .getByRole("button", { name: "Set session date to today", exact: true })
+    .click();
+  expect(
+    await page.getByLabel("Workout date", { exact: true }).inputValue(),
+  ).toBe(localDay());
   await page.getByLabel("Workout date", { exact: true }).fill("2026-01-15");
   await page
     .getByLabel("Choose a workout", { exact: true })
@@ -103,6 +126,14 @@ test("create, prescribe, arrange, log, and revisit a workout on desktop and mobi
     .getByRole("button", { name: `Edit ${exercise}`, exact: true })
     .click();
   await dialog.getByLabel("Effective from", { exact: true }).fill("2026-03-01");
+  await dialog.getByRole("button", { name: "Next effective day" }).click();
+  await expect(
+    dialog.getByLabel("Effective from", { exact: true }),
+  ).toHaveValue("2026-03-02");
+  await dialog.getByRole("button", { name: "Previous effective day" }).click();
+  await expect(
+    dialog.getByLabel("Effective from", { exact: true }),
+  ).toHaveValue("2026-03-01");
   await dialog.getByLabel("Weight (kg)", { exact: true }).fill("65");
   await dialog
     .getByRole("button", { name: "Save prescription", exact: true })
