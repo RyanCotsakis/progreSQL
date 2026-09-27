@@ -358,7 +358,7 @@ function WorkoutApp() {
           }
         </main>
         <footer className="mx-auto flex max-w-[1300px] justify-between px-5 py-6 text-xs text-muted-foreground sm:px-10">
-          <span>ProgreSQL · 3.0.0</span>
+          <span>ProgreSQL · 3.0.1</span>
         </footer>
       </div>
       {((error && data) || notice) && (
@@ -384,6 +384,7 @@ function WorkoutApp() {
       )}
       {data && modal && (
         <Dialog
+          focusTitle={modal.type === "exercise" && !!modal.id}
           open
           title={
             modal.type === "exercise"
@@ -1261,9 +1262,97 @@ function ExerciseEditor({
   return (
     <div className="space-y-6">
       {exercise && (
-        <h3 className="text-lg font-semibold">{exercise.exercise_name}</h3>
+        <div className="space-y-2">
+          <h3 className="text-lg font-semibold">{exercise.exercise_name}</h3>
+          {[
+            exercise.muscle_group,
+            exercise.equipment,
+            exercise.description,
+          ].some((value) => value?.trim()) && (
+            <section
+              aria-label="Exercise information"
+              className="space-y-1 text-sm text-muted-foreground"
+            >
+              {[exercise.muscle_group, exercise.equipment].some((value) =>
+                value?.trim(),
+              ) && (
+                <p className="break-words">
+                  {[exercise.muscle_group, exercise.equipment]
+                    .filter((value) => value?.trim())
+                    .join(" · ")}
+                </p>
+              )}
+              {exercise.description?.trim() && (
+                <p className="whitespace-pre-wrap break-words">
+                  {exercise.description}
+                </p>
+              )}
+            </section>
+          )}
+        </div>
       )}
-      <section aria-label="Exercise information">
+      {exercise && (
+        <>
+          <section
+            aria-label="Exercise workouts"
+            className="rounded-lg border bg-muted/30 p-4"
+          >
+            <h4 className="text-sm font-semibold">Workouts</h4>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Active memberships as of {fmt(today)}.
+            </p>
+            {workouts.length ? (
+              <ul className="mt-3 space-y-1 text-sm">
+                {workouts.map((workout) => (
+                  <li key={workout.workout_id} className="break-words">
+                    {workout.workout_name}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-sm text-muted-foreground">
+                Not part of any active workouts.
+              </p>
+            )}
+          </section>
+          <Progression history={history} data={data} />
+          <details>
+            <summary className="cursor-pointer text-sm font-medium">
+              Prescription history ({history.length})
+            </summary>
+            <div className="table-wrap mt-3">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>From</th>
+                    <th>Until (exclusive)</th>
+                    <th>kg</th>
+                    <th>Reps × sets</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.map((p) => (
+                    <tr key={p.exercise_settings_id}>
+                      <td className="whitespace-nowrap">{p.effective_from}</td>
+                      <td>{p.effective_to || "Ongoing"}</td>
+                      <td>{p.weight}</td>
+                      <td>
+                        {p.max_reps} × {p.sets}
+                      </td>
+                      <td>{p.notes || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
+        </>
+      )}
+      <details open={!exercise}>
+        <summary className="mb-4 cursor-pointer text-sm font-medium">
+          {exercise ? "Edit exercise details" : "Exercise details"}
+        </summary>
         <form
           className="space-y-4"
           onChange={() => setDetailsSaved(false)}
@@ -1333,65 +1422,7 @@ function ExerciseEditor({
             </p>
           )}
         </form>
-      </section>
-      {exercise && (
-        <>
-          <section
-            aria-label="Exercise workouts"
-            className="rounded-lg border bg-muted/30 p-4"
-          >
-            <h4 className="text-sm font-semibold">Workouts</h4>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Active memberships as of {fmt(today)}.
-            </p>
-            {workouts.length ? (
-              <ul className="mt-3 space-y-1 text-sm">
-                {workouts.map((workout) => (
-                  <li key={workout.workout_id} className="break-words">
-                    {workout.workout_name}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="mt-3 text-sm text-muted-foreground">
-                Not part of any active workouts.
-              </p>
-            )}
-          </section>
-          <Progression history={history} data={data} />
-          <details>
-            <summary className="cursor-pointer text-sm font-medium">
-              Prescription history ({history.length})
-            </summary>
-            <div className="table-wrap mt-3">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>From</th>
-                    <th>Until (exclusive)</th>
-                    <th>kg</th>
-                    <th>Reps × sets</th>
-                    <th>Notes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.map((p) => (
-                    <tr key={p.exercise_settings_id}>
-                      <td className="whitespace-nowrap">{p.effective_from}</td>
-                      <td>{p.effective_to || "Ongoing"}</td>
-                      <td>{p.weight}</td>
-                      <td>
-                        {p.max_reps} × {p.sets}
-                      </td>
-                      <td>{p.notes || "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </details>
-        </>
-      )}
+      </details>
       {exercise && (
         <>
           <form

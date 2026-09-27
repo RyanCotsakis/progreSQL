@@ -75,10 +75,13 @@ test("create, prescribe, arrange, log, and revisit a workout on desktop and mobi
   ).toBeVisible();
   await expect(
     dialog.getByLabel("Muscle group", { exact: true }),
-  ).toBeVisible();
-  await expect(dialog.getByLabel("Equipment", { exact: true })).toHaveValue(
-    "Barbell",
-  );
+  ).not.toBeVisible();
+  await expect(
+    dialog.getByRole("heading", { name: "Exercise details", exact: true }),
+  ).toBeFocused();
+  await expect(
+    dialog.getByRole("region", { name: "Exercise information" }),
+  ).toHaveText("Chest · Barbell");
   const information = await dialog
     .getByRole("region", { name: "Exercise information" })
     .boundingBox();
@@ -86,6 +89,10 @@ test("create, prescribe, arrange, log, and revisit a workout on desktop and mobi
     .getByRole("region", { name: "Exercise workouts" })
     .boundingBox();
   expect(information!.y + information!.height).toBeLessThan(memberships!.y);
+  await dialog.getByText("Edit exercise details", { exact: true }).click();
+  await expect(dialog.getByLabel("Equipment", { exact: true })).toHaveValue(
+    "Barbell",
+  );
   await dialog
     .getByLabel("Description", { exact: true })
     .fill("Keep your shoulders steady.");
@@ -96,6 +103,27 @@ test("create, prescribe, arrange, log, and revisit a workout on desktop and mobi
   await expect(dialog.getByRole("status")).toContainText(
     "Exercise details saved.",
   );
+  await expect(
+    dialog.getByRole("region", { name: "Exercise information" }),
+  ).toContainText("Keep your shoulders steady.");
+  for (const label of ["Muscle group", "Equipment", "Description"])
+    await dialog.getByLabel(label, { exact: true }).fill("");
+  await dialog
+    .getByRole("button", { name: "Save details", exact: true })
+    .click();
+  await expect(
+    dialog.getByRole("region", { name: "Exercise information" }),
+  ).toHaveCount(0);
+  await dialog.getByLabel("Equipment", { exact: true }).fill("Barbell");
+  await dialog
+    .getByLabel("Description", { exact: true })
+    .fill("Keep your shoulders steady.");
+  await dialog
+    .getByRole("button", { name: "Save details", exact: true })
+    .click();
+  await expect(
+    dialog.getByRole("region", { name: "Exercise information" }),
+  ).toHaveText("BarbellKeep your shoulders steady.");
 
   await dialog.getByRole("button", { name: "Close dialog" }).click();
   await page.getByRole("button", { name: "New workout", exact: true }).click();
@@ -158,9 +186,12 @@ test("create, prescribe, arrange, log, and revisit a workout on desktop and mobi
   await page
     .getByRole("button", { name: `Edit ${exercise}`, exact: true })
     .click();
-  await expect(dialog.getByLabel("Description", { exact: true })).toHaveValue(
-    "Keep your shoulders steady.",
-  );
+  await expect(
+    dialog.getByLabel("Description", { exact: true }),
+  ).not.toBeVisible();
+  await expect(
+    dialog.getByRole("region", { name: "Exercise information" }),
+  ).toContainText("Keep your shoulders steady.");
   await dialog.getByLabel("Effective from", { exact: true }).fill("2026-03-01");
   if (testInfo.project.name === "mobile") {
     const originalViewport = page.viewportSize()!;

@@ -1,6 +1,6 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 
 export function Dialog({
   title,
@@ -8,13 +8,16 @@ export function Dialog({
   open,
   onClose,
   children,
+  focusTitle = false,
 }: {
   title: string;
   description?: string;
   open: boolean;
   onClose: () => void;
   children: ReactNode;
+  focusTitle?: boolean;
 }) {
+  const titleRef = useRef<HTMLHeadingElement>(null);
   return (
     <DialogPrimitive.Root
       open={open}
@@ -24,8 +27,20 @@ export function Dialog({
     >
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-slate-950/35 backdrop-blur-[2px]" />
-        <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border bg-background p-6 shadow-xl focus:outline-none">
-          <DialogPrimitive.Title className="pr-8 text-xl font-semibold tracking-tight">
+        <DialogPrimitive.Content
+          onOpenAutoFocus={(event) => {
+            if (focusTitle) {
+              event.preventDefault();
+              titleRef.current?.focus();
+            }
+          }}
+          className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border bg-background p-6 shadow-xl focus:outline-none"
+        >
+          <DialogPrimitive.Title
+            ref={titleRef}
+            tabIndex={focusTitle ? -1 : undefined}
+            className="pr-8 text-xl font-semibold tracking-tight outline-none"
+          >
             {title}
           </DialogPrimitive.Title>
           <DialogPrimitive.Description className="mt-2 mb-6 text-sm text-muted-foreground">
