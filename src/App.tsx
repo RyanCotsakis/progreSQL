@@ -358,7 +358,7 @@ function WorkoutApp() {
           }
         </main>
         <footer className="mx-auto flex max-w-[1300px] justify-between px-5 py-6 text-xs text-muted-foreground sm:px-10">
-          <span>ProgreSQL · 2.1.3</span>
+          <span>ProgreSQL · 3.0.0</span>
         </footer>
       </div>
       {((error && data) || notice) && (
@@ -632,7 +632,7 @@ function Calendar({
                     <span
                       key={id}
                       title={workoutName(id)}
-                      className="size-1.5 rounded-full ring-1 ring-white/70"
+                      className="size-2 rounded-full border border-black/25 ring-1 ring-white/80"
                       style={{ backgroundColor: workoutColour(id) }}
                     />
                   ))}
@@ -650,7 +650,7 @@ function Calendar({
               <li key={id} className="flex items-center gap-2">
                 <span
                   aria-hidden="true"
-                  className="size-2 shrink-0 rounded-full"
+                  className="size-2 shrink-0 rounded-full border border-black/25"
                   style={{ backgroundColor: workoutColour(id) }}
                 />
                 <span className="break-words">{workoutName(id)}</span>
@@ -759,7 +759,7 @@ function Journal({
                     <li key={id} className="flex min-w-0 items-center gap-2">
                       <span
                         aria-hidden="true"
-                        className="size-2 shrink-0 rounded-full"
+                        className="size-2 shrink-0 rounded-full border border-black/25"
                         style={{ backgroundColor: workoutColour(id) }}
                       />
                       <span className="break-words">
@@ -1239,6 +1239,7 @@ function ExerciseEditor({
   saving: boolean;
   close: () => void;
 }) {
+  const [detailsSaved, setDetailsSaved] = useState(false);
   const today = localDay();
   const workouts = exercise
     ? data.workouts
@@ -1260,8 +1261,81 @@ function ExerciseEditor({
   return (
     <div className="space-y-6">
       {exercise && (
+        <h3 className="text-lg font-semibold">{exercise.exercise_name}</h3>
+      )}
+      <section aria-label="Exercise information">
+        <form
+          className="space-y-4"
+          onChange={() => setDetailsSaved(false)}
+          onSubmit={async (e) => {
+            const f = form(e);
+            const metadata = {
+              name: str(f, "name"),
+              muscle_group: str(f, "muscle_group"),
+              equipment: str(f, "equipment"),
+              description: str(f, "description"),
+            };
+            const action: Action = exercise
+              ? {
+                  action: "exercise.update",
+                  id: exercise.exercise_id,
+                  ...metadata,
+                }
+              : { action: "exercise.create", ...metadata, ...stateFields(f) };
+            if (await run(action)) {
+              if (!exercise) close();
+              else setDetailsSaved(true);
+            }
+          }}
+        >
+          <Field
+            label="Exercise name"
+            name="name"
+            required
+            maxLength={120}
+            defaultValue={exercise?.exercise_name}
+            placeholder="e.g. Barbell squat"
+          />
+          <div className="grid grid-cols-2 gap-3">
+            <Field
+              label="Muscle group"
+              name="muscle_group"
+              maxLength={80}
+              defaultValue={exercise?.muscle_group || ""}
+            />
+            <Field
+              label="Equipment"
+              name="equipment"
+              maxLength={80}
+              defaultValue={exercise?.equipment || ""}
+            />
+          </div>
+          <Field
+            label="Description"
+            name="description"
+            maxLength={10000}
+            defaultValue={exercise?.description || ""}
+          />
+          {!exercise && (
+            <>
+              <h3 className="border-t pt-4 text-sm font-semibold">
+                Initial prescription
+              </h3>
+              <StateInputs />
+            </>
+          )}
+          <Save saving={saving}>
+            {exercise ? "Save details" : "Create exercise"}
+          </Save>
+          {detailsSaved && (
+            <p role="status" className="text-sm text-primary">
+              Exercise details saved.
+            </p>
+          )}
+        </form>
+      </section>
+      {exercise && (
         <>
-          <h3 className="text-lg font-semibold">{exercise.exercise_name}</h3>
           <section
             aria-label="Exercise workouts"
             className="rounded-lg border bg-muted/30 p-4"
@@ -1318,71 +1392,6 @@ function ExerciseEditor({
           </details>
         </>
       )}
-      <details open={!exercise}>
-        <summary className="mb-4 cursor-pointer text-sm font-medium">
-          {exercise ? "Edit exercise details" : "Exercise details"}
-        </summary>
-        <form
-          className="space-y-4"
-          onSubmit={async (e) => {
-            const f = form(e);
-            const metadata = {
-              name: str(f, "name"),
-              muscle_group: str(f, "muscle_group"),
-              equipment: str(f, "equipment"),
-              description: str(f, "description"),
-            };
-            const action: Action = exercise
-              ? {
-                  action: "exercise.update",
-                  id: exercise.exercise_id,
-                  ...metadata,
-                }
-              : { action: "exercise.create", ...metadata, ...stateFields(f) };
-            if (await run(action)) close();
-          }}
-        >
-          <Field
-            label="Exercise name"
-            name="name"
-            required
-            maxLength={120}
-            defaultValue={exercise?.exercise_name}
-            placeholder="e.g. Barbell squat"
-          />
-          <div className="grid grid-cols-2 gap-3">
-            <Field
-              label="Muscle group"
-              name="muscle_group"
-              maxLength={80}
-              defaultValue={exercise?.muscle_group || ""}
-            />
-            <Field
-              label="Equipment"
-              name="equipment"
-              maxLength={80}
-              defaultValue={exercise?.equipment || ""}
-            />
-          </div>
-          <Field
-            label="Description"
-            name="description"
-            maxLength={10000}
-            defaultValue={exercise?.description || ""}
-          />
-          {!exercise && (
-            <>
-              <h3 className="border-t pt-4 text-sm font-semibold">
-                Initial prescription
-              </h3>
-              <StateInputs />
-            </>
-          )}
-          <Save saving={saving}>
-            {exercise ? "Save details" : "Create exercise"}
-          </Save>
-        </form>
-      </details>
       {exercise && (
         <>
           <form

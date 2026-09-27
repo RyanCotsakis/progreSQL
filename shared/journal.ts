@@ -60,17 +60,18 @@ export function monthSessions(sessions: WorkoutSession[], month: string) {
   };
 }
 
-// IDs keep colours stable when navigating months or renaming/archiving workouts.
+// Okabe–Ito colour-universal-design palette: https://jfly.uni-koeln.de/color/
+// Keep IDs stable across months and cycle this palette instead of inventing hues.
 export function workoutColour(id: number) {
   const palette = [
-    "#176b4f",
-    "#2563eb",
-    "#b45309",
-    "#9333ea",
-    "#be185d",
-    "#0e7490",
-    "#c2410c",
-    "#4d7c0f",
+    "#0072b2",
+    "#e69f00",
+    "#009e73",
+    "#cc79a7",
+    "#56b4e9",
+    "#d55e00",
+    "#000000",
+    "#f0e442",
   ];
-  return palette[id - 1] || `hsl(${(id * 137.508) % 360} 65% 38%)`;
+  return palette[(id - 1) % palette.length];
 }
