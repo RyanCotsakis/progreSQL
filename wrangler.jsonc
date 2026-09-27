@@ -33,12 +33,6 @@
     },
   ],
   "secrets": {
-    "required": [
-      "AUTH_USERNAME",
-      "AUTH_PASSWORD_PARAMETERS",
-      "AUTH_PASSWORD_VERIFIER",
-      "AUTH_PEPPER",
-      "AUTH_TOTP_SECRET",
-    ],
+    "required": ["AUTH_PEPPER", "AUTH_ENCRYPTION_KEY"],
   },
 }

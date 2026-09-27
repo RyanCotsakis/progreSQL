@@ -8,6 +8,7 @@ import {
 } from "../shared/journal";
 import type { WorkoutSession } from "../shared/model";
 const session = (workout_id: number, workout_date: string): WorkoutSession => ({
+  user_id: 1,
   workout_id,
   workout_date,
   workout_session_id: workout_id,

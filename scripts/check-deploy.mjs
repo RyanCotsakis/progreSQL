@@ -23,19 +23,15 @@ try {
   const secrets = JSON.parse(
     readFileSync(new URL("../.env.auth-upload.json", import.meta.url), "utf8"),
   );
-  for (const key of [
-    "AUTH_USERNAME",
-    "AUTH_PASSWORD_PARAMETERS",
-    "AUTH_PASSWORD_VERIFIER",
-    "AUTH_PEPPER",
-    "AUTH_TOTP_SECRET",
-  ]) {
+  for (const key of ["AUTH_PEPPER", "AUTH_ENCRYPTION_KEY"]) {
     if (typeof secrets[key] !== "string" || !secrets[key])
       errors.push(`Missing ${key} in the local secrets file.`);
   }
+  if (!/^[a-f0-9]{64}$/.test(secrets.AUTH_ENCRYPTION_KEY || ""))
+    errors.push("AUTH_ENCRYPTION_KEY must contain 64 hexadecimal characters.");
 } catch {
   errors.push(
-    "Run scripts/prepare_worker_auth.py to prepare the ignored authentication secrets file.",
+    "Run scripts/bootstrap-users.mjs to prepare the multi-user authentication secrets.",
   );
 }
 if (errors.length) {

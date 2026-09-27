@@ -1,3 +1,5 @@
+import { migrate, testEnv, admin } from "./helpers";
+import type { Action } from "../shared/actions";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { readFileSync } from "node:fs";
@@ -8,12 +10,17 @@ import {
   hex,
   type Env as AuthEnv,
 } from "../worker/auth";
-import { mutate, readData } from "../worker/service";
+import {
+  mutate as serviceMutate,
+  readData as serviceReadData,
+} from "../worker/service";
 import worker from "../worker/index";
 import { authorize, type Env } from "../worker/auth";
 import { actionSchema } from "../shared/actions";
 import { membersFor, stateFor, type AppData } from "../shared/model";
 
+const mutate = (db: D1Database, a: Action) => serviceMutate(db, a, admin);
+const readData = (db: D1Database) => serviceReadData(db, admin);
 let mf: Miniflare;
 let db: D1Database;
 beforeAll(async () => {
@@ -26,28 +33,14 @@ beforeAll(async () => {
     }),
   );
   db = (await mf.getD1Database("DB")) as unknown as D1Database;
-  let schema = readFileSync(
-    new URL("../migrations/0001_initial.sql", import.meta.url),
-    "utf8",
-  );
-  schema += readFileSync(
-    new URL("../migrations/0002_auth.sql", import.meta.url),
-    "utf8",
-  );
-  await db.batch(
-    schema
-      .split(";")
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map((s) => db.prepare(s)),
-  );
+  await migrate(db);
 }, 30000);
 beforeEach(async () => {
   await db.batch(
     [
       "auth_session",
       "auth_rate_limit",
-      "auth_totp",
+      "auth_token",
       "workout_session",
       "workout_exercise",
       "exercise_settings_history",
@@ -55,6 +48,11 @@ beforeEach(async () => {
       "exercise",
     ].map((t) => db.prepare(`DELETE FROM ${t}`)),
   );
+  await db
+    .prepare(
+      "UPDATE users SET last_totp_step=-1,credential_version=1 WHERE user_id=1",
+    )
+    .run();
 });
 afterAll(async () => {
   await mf?.dispose();
@@ -317,10 +315,10 @@ describe("API security and validation", () => {
         new Request("https://progresql.cotsakis.com/api/data"),
         env(),
       ),
-    ).toBe(false);
+    ).toBeNull();
     expect(
       await authorize(new Request("http://127.0.0.1/api/data"), {} as Env),
-    ).toBe(false);
+    ).toBeNull();
     expect(
       (
         await worker.fetch(
@@ -454,36 +452,7 @@ describe("HTTPS session transport", () => {
 });
 const proof = "ab".repeat(32);
 async function authEnv(): Promise<AuthEnv> {
-  const pepper = "test-only-pepper-with-at-least-32-characters";
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(pepper),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const verifier = hex(
-    await crypto.subtle.sign(
-      "HMAC",
-      key,
-      Uint8Array.from({ length: 32 }, () => 0xab),
-    ),
-  );
-  return {
-    DB: db,
-    AUTH_USERNAME: "Private",
-    AUTH_PASSWORD_PARAMETERS: JSON.stringify({
-      algorithm: "argon2id",
-      salt: "MTIzNDU2Nzg",
-      iterations: 2,
-      memorySize: 1024,
-      parallelism: 1,
-      hashLength: 32,
-    }),
-    AUTH_PASSWORD_VERIFIER: verifier,
-    AUTH_PEPPER: pepper,
-    AUTH_TOTP_SECRET: testSecret,
-  } as AuthEnv;
+  return testEnv(db);
 }
 const authRequest = (
   body: unknown,
@@ -538,7 +507,7 @@ describe("Password, authenticator, and sessions", () => {
     const request = new Request("https://progresql.cotsakis.com/api/data", {
       headers: { Cookie: cookie },
     });
-    expect(await authorize(request, env)).toBe(true);
+    expect(await authorize(request, env)).toEqual(admin);
     const stored = await db
       .prepare("SELECT token_hash FROM auth_session")
       .first<{ token_hash: string }>();
@@ -549,7 +518,7 @@ describe("Password, authenticator, and sessions", () => {
     );
     expect(signedOut.status).toBe(200);
     expect(signedOut.headers.get("Set-Cookie")).toContain("Max-Age=0");
-    expect(await authorize(request, env)).toBe(false);
+    expect(await authorize(request, env)).toBeNull();
   });
   it("expires sessions and invalidates them after a credential change", async () => {
     const env = await authEnv();
@@ -557,14 +526,20 @@ describe("Password, authenticator, and sessions", () => {
     const request = new Request("https://progresql.cotsakis.com/api/data", {
       headers: { Cookie: cookie },
     });
-    expect(
-      await authorize(request, {
-        ...env,
-        AUTH_TOTP_SECRET: "JBSWY3DPEHPK3PXP",
-      }),
-    ).toBe(false);
+    expect(await authorize(request, env)).toEqual(admin);
     await db.prepare("UPDATE auth_session SET expires_at=0").run();
-    expect(await authorize(request, env)).toBe(false);
+    expect(await authorize(request, env)).toBeNull();
+    await db
+      .prepare("UPDATE auth_session SET expires_at=?")
+      .bind(Math.floor(Date.now() / 1000) + 3600)
+      .run();
+    expect(await authorize(request, env)).toEqual(admin);
+    await db
+      .prepare(
+        "UPDATE users SET credential_version=credential_version+1 WHERE user_id=1",
+      )
+      .run();
+    expect(await authorize(request, env)).toBeNull();
   });
   it("allows exactly one concurrent login with a given authenticator code", async () => {
     const env = await authEnv();
@@ -607,10 +582,10 @@ describe("Password, authenticator, and sessions", () => {
     const body = await response.text();
     expect(JSON.parse(body).algorithm).toBe("argon2id");
     for (const value of [
-      env.AUTH_PASSWORD_VERIFIER,
-      env.AUTH_TOTP_SECRET,
+      "never-publish-a-verifier",
+      testSecret,
       env.AUTH_PEPPER,
-      env.AUTH_USERNAME,
+      "Private",
     ])
       expect(body).not.toContain(value);
   });

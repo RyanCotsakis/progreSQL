@@ -13,7 +13,7 @@ npm run db:migrate
 npm run dev
 ```
 
-Open http://127.0.0.1:5173. The UI uses Vite, and the API runs on port 8787. Local authentication is bypassed only when the explicit development flag is enabled and the request uses a loopback hostname. Production requires the existing username, password, and Authenticator code. To test that login locally, prepare the credentials as described in the deployment guide, then run Wrangler without the `LOCAL_DEV` flag.
+Open http://127.0.0.1:5173. The UI uses Vite, and the API runs on port 8787. Local authentication is bypassed only when the explicit development flag is enabled and the request uses a loopback hostname. Production requires each user's username, password, and authenticator code. Local bypass resolves to user 1; account management still requires real credentials. To test that login locally, prepare the credentials as described in the deployment guide, then run Wrangler without the `LOCAL_DEV` flag.
 
 For a preview of the production bundle, run `npm run preview` and open http://127.0.0.1:8787.
 
@@ -23,7 +23,9 @@ For a preview of the production bundle, run `npm run preview` and open http://12
 - Exercise library, prescribed weights/reps/sets, dated changes, and weight progression.
 - Workouts with dated exercise membership and ordering.
 - Archiving that preserves history and prevents archiving exercises still in active workouts.
-- Table editor, administrative inserts, and a JSON data export.
+- Private user accounts with invitation links, authenticator enrollment, and admin-assisted recovery.
+- Admin Users tab for roles, username changes, and permanent account deletion.
+- Admin table editor, owner filters, administrative inserts, and JSON data exports.
 - Responsive layouts, keyboard-accessible dialogs, loading states, and validation feedback.
 
 Only workout completion and prescribed settings are tracked. Individual performed sets, actual repetitions, and RPE are not tracked.
@@ -46,12 +48,7 @@ The exporter reads `DATABASE_URL`, falling back to `database_url` in your local 
 
 It verifies row counts, foreign keys, SQLite integrity, and replay of the exact SQL file. Credentials and row contents are never printed. Existing export directories are never overwritten.
 
-Apply the schema first, then import into an empty local database:
-
-```powershell
-npm run db:migrate
-npx wrangler d1 execute progresql --local --file exports/<timestamp>/import.sql
-```
+The exporter targets the legacy `0001` schema. Do not import its SQL directly into the current multi-user schema. Existing D1 data is migrated in place by `0003_users.sql`; follow the deployment guide for the one-time credential import.
 
 Do not commit snapshots or SQL exports. For production migration and authentication setup, see [Cloudflare deployment](docs/deployment.md).
 
@@ -71,7 +68,7 @@ $env:PW_CHROMIUM_CHANNEL = 'msedge'
 npm run test:browser
 ```
 
-Browser tests use an isolated local D1 database under `.wrangler/e2e`, never the live database. `npm test` covers temporal behavior, transaction rollback, concurrency, constraints, API validation, password verification, TOTP replay prevention, session expiry/revocation, CSRF protection, and login throttling. `npm run format` formats the TypeScript application.
+Browser tests use an isolated local D1 database under `.wrangler/e2e`, never the live database. `npm test` covers temporal behavior, transaction rollback, concurrency, constraints, API validation, password verification, TOTP replay prevention, session expiry/revocation, CSRF protection, login throttling, user isolation, invitations/recovery, admin permissions, deletion rollback, and populated schema migration. `npm run format` formats the TypeScript application.
 
 ## Project layout
 
@@ -85,4 +82,4 @@ Browser tests use an isolated local D1 database under `.wrangler/e2e`, never the
 | `tests-web/` | D1, authentication, and browser tests |
 | `app/`, `alembic/`, `tests/` | Preserved Python reference and rollback path |
 
-The old app remains available for rollback until the production migration is accepted. Its setup instructions are in [Legacy Streamlit](docs/legacy-streamlit.md).
+The old app remains archived as a reference. It does not support multiple users. Its setup instructions are in [Legacy Streamlit](docs/legacy-streamlit.md).

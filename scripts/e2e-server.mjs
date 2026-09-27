@@ -1,3 +1,4 @@
+import { bootstrapSQL } from "./bootstrap-users.mjs";
 import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -43,6 +44,8 @@ config.vars = {
   AUTH_PEPPER: pepper,
   AUTH_TOTP_SECRET: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
 };
+const legacy = { ...config.vars };
+config.vars = { AUTH_PEPPER: pepper, AUTH_ENCRYPTION_KEY: "12".repeat(32) };
 delete config.secrets;
 mkdirSync(".wrangler", { recursive: true });
 const configPath = ".wrangler/e2e-config.json";
@@ -63,7 +66,67 @@ execFileSync(
     "--local",
     ...base,
     "--command",
-    "DELETE FROM auth_session; DELETE FROM auth_totp; DELETE FROM auth_rate_limit;",
+    "DELETE FROM auth_session; DELETE FROM auth_rate_limit; DELETE FROM auth_token; UPDATE users SET last_totp_step=-1 WHERE user_id=1;",
+  ],
+  { stdio: "inherit" },
+);
+const bootstrapPath = ".wrangler/e2e-bootstrap.sql";
+writeFileSync(
+  bootstrapPath,
+  bootstrapSQL(legacy, config.vars.AUTH_ENCRYPTION_KEY),
+);
+execFileSync(
+  process.execPath,
+  [
+    cli,
+    "d1",
+    "execute",
+    "progresql",
+    "--local",
+    ...base,
+    "--file",
+    bootstrapPath,
+  ],
+  { stdio: "inherit" },
+);
+// Isolated local fixtures: each browser flow has its own TOTP replay state.
+// Clear old test workouts so repeated browser runs have the same starting state.
+const fixtures = [
+  "DELETE FROM workout_session;",
+  "DELETE FROM workout_exercise;",
+  "DELETE FROM exercise_settings_history;",
+  "DELETE FROM workout;",
+  "DELETE FROM exercise;",
+  "DELETE FROM users WHERE user_id<>1;",
+];
+for (const device of ["desktop", "mobile"]) {
+  for (const flow of [
+    "inviter",
+    "password-admin",
+    "recover-admin",
+    "delete-admin",
+    "password-user",
+    "recover-user",
+    "delete-user",
+  ]) {
+    fixtures.push(
+      `INSERT INTO users(username,is_admin,status,password_parameters,password_verifier,totp_secret) SELECT '${device}-${flow}',${flow.endsWith("user") ? 0 : 1},'active',password_parameters,password_verifier,totp_secret FROM users WHERE user_id=1;`,
+    );
+  }
+}
+const fixturePath = ".wrangler/e2e-users.sql";
+writeFileSync(fixturePath, fixtures.join("\n"));
+execFileSync(
+  process.execPath,
+  [
+    cli,
+    "d1",
+    "execute",
+    "progresql",
+    "--local",
+    ...base,
+    "--file",
+    fixturePath,
   ],
   { stdio: "inherit" },
 );

@@ -1,4 +1,5 @@
 export interface Exercise {
+  user_id: number;
   exercise_id: number;
   exercise_name: string;
   muscle_group: string | null;
@@ -9,6 +10,7 @@ export interface Exercise {
   updated_at: string;
 }
 export interface Workout {
+  user_id: number;
   workout_id: number;
   workout_name: string;
   description: string | null;
@@ -17,6 +19,7 @@ export interface Workout {
   updated_at: string;
 }
 export interface Prescription {
+  user_id: number;
   exercise_settings_id: number;
   exercise_id: number;
   effective_from: string;
@@ -28,6 +31,7 @@ export interface Prescription {
   created_at: string;
 }
 export interface Membership {
+  user_id: number;
   workout_exercise_id: number;
   workout_id: number;
   exercise_id: number;
@@ -36,6 +40,7 @@ export interface Membership {
   effective_to: string | null;
 }
 export interface WorkoutSession {
+  user_id: number;
   workout_session_id: number;
   workout_id: number;
   workout_date: string;
@@ -66,6 +71,7 @@ export const primaryKeys: Record<TableName, string> = {
 };
 export const tableColumns: Record<TableName, string[]> = {
   exercise: [
+    "user_id",
     "exercise_id",
     "exercise_name",
     "muscle_group",
@@ -76,6 +82,7 @@ export const tableColumns: Record<TableName, string[]> = {
     "updated_at",
   ],
   workout: [
+    "user_id",
     "workout_id",
     "workout_name",
     "description",
@@ -84,6 +91,7 @@ export const tableColumns: Record<TableName, string[]> = {
     "updated_at",
   ],
   exercise_settings_history: [
+    "user_id",
     "exercise_settings_id",
     "exercise_id",
     "effective_from",
@@ -95,6 +103,7 @@ export const tableColumns: Record<TableName, string[]> = {
     "created_at",
   ],
   workout_exercise: [
+    "user_id",
     "workout_exercise_id",
     "workout_id",
     "exercise_id",
@@ -103,6 +112,7 @@ export const tableColumns: Record<TableName, string[]> = {
     "effective_to",
   ],
   workout_session: [
+    "user_id",
     "workout_session_id",
     "workout_id",
     "workout_date",

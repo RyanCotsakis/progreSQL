@@ -34,6 +34,8 @@ def convert(source: dict, pepper: str) -> dict[str, str]:
 
 
 def main():
+    if OUTPUT.exists() and "AUTH_ENCRYPTION_KEY" in json.loads(OUTPUT.read_text()):
+        raise SystemExit("Multi-user credentials are already prepared. Do not overwrite the encryption key or bootstrap users again.")
     source = tomllib.loads((ROOT / '.streamlit/secrets.toml').read_text(encoding='utf-8'))
     # Reuse the pepper on repeated runs so existing sessions aren't needlessly revoked.
     pepper = json.loads(OUTPUT.read_text())['AUTH_PEPPER'] if OUTPUT.exists() else secrets.token_urlsafe(48)

@@ -1,91 +1,84 @@
-# Cloudflare deployment
+# Cloudflare deployment and user migration
 
-Target: **progresql.cotsakis.com**, using Workers Free and D1 Free. The app keeps the original username, password, and existing Authenticator entry. No Cloudflare Zero Trust, Microsoft identity provider, paid plan, or payment-card setup is part of this deployment.
+Target: **progresql.cotsakis.com**, Worker **progresql**, D1 database **progresql** (`34ba2cfc-f847-4cf2-aa0a-403490e164d7`). Invitations are sent manually. No email service, OAuth provider, or paid-plan setup is introduced.
 
-## Resources
+## Authentication and account management
 
-- Account: `b21e7fde43919fa4af4e5ccdf3a32d90`
-- Zone: `cotsakis.com`
-- D1: `progresql`, ID `34ba2cfc-f847-4cf2-aa0a-403490e164d7`, Western Europe
-- Worker: `progresql`
+Every user signs in with a username, password, and authenticator code. The browser derives an Argon2id proof; the Worker verifies its peppered HMAC and the TOTP. Treat the proof like a password. Never log request bodies, tokens, QR codes, or credentials.
 
-The original PostgreSQL source and Streamlit app are retained for rollback. Public `workers.dev` and preview URLs are disabled. Never enable `LOCAL_DEV` in production.
+Worker secrets are now `AUTH_PEPPER` (preserve the existing value) and `AUTH_ENCRYPTION_KEY` (32 random bytes encoded as 64 lowercase hexadecimal characters). Password verifiers and AES-GCM encrypted authenticator secrets live in D1. Back up both Worker secrets securely alongside database backups. Changing either secret without migrating credentials will break authentication.
 
-The Worker runs before static assets and redirects HTTP requests to HTTPS before serving the login form or processing authentication. HTTPS responses include HSTS. This is required for browsers to retain the Secure session cookie; loopback development remains available over HTTP.
+Sessions last one hour and use Secure, HttpOnly, SameSite=Strict cookies in production. D1 stores only session/token hashes. Credential and role changes revoke sessions. Authenticator codes may be used once per user and time step; after signing in or confirming an admin action, wait for the next code. Requests require a same-origin JSON POST for mutations. Each authentication category permits 10 attempts per IP/account and 100 globally per five minutes.
 
-## Verified deployment
+Admins use **Users** to create accounts, edit usernames/roles, issue recovery links, or permanently delete an account. Sensitive actions require the admin's password and a fresh authenticator code. Self-deletion and self-demotion are blocked, and SQL guards protect the last admin. Deletion removes the account and all workout records in one transaction.
 
-Deployed on 24 September 2026 as Worker version `fbf833f2-43f2-498c-af12-50db67c795d8`. The read-only source export at `exports/20260924-205437/` matched the earlier imported snapshot exactly. All 109 application rows were compared against the live authenticated API: 16 exercises, 3 workouts, 41 prescriptions, 31 memberships, and 18 sessions. D1 foreign-key checks passed.
+- **Invitation:** expires in 24 hours. The recipient chooses a password and scans a QR code generated in their browser, then confirms a code. New libraries are empty.
+- **Reset password:** expires in one hour. The recipient chooses a password and confirms their existing authenticator.
+- **Recover account:** expires in one hour. The recipient chooses a password and enrolls a new authenticator.
 
-Validation included 20 TypeScript service/authentication tests, 17 Python reference/export/credential-conversion tests, desktop and mobile browser flows, a production build and deployment dry run, and live HTTPS login/logout with the preserved credentials and TOTP. The live check did not change workout data. No paid plan was enabled.
+Copy the link and send it yourself after verifying the recipient. Links are single-use and held in URL fragments; opening one clears the fragment from browser history without consuming the token. Reloading requires reopening the original link. Reissuing invalidates the previous link. Recovery ends existing sessions immediately and blocks login until completion. Passwords have a 12-character minimum in the setup UI. Recovery of your own account opens the setup flow immediately.
 
-Desktop/mobile browser tests passed locally. The live HTTPS checks used a public DNS answer because this machine cached the pre-deployment NXDOMAIN. Direct live Edge navigation timed out from this environment, so that browser check remains unverified; the live homepage, authenticated API, complete data comparison, and logout were verified over certificate-validated HTTPS.
+Data manager is admin-only. It edits and exports the five workout tables, supports an owner filter, and requires `user_id` for inserts. Existing ownership cannot change. Authentication tables and secrets are never returned through this screen. Ordinary app views always show the signed-in user's own records.
 
-## Authentication
+## One-time migration from the existing single account
 
-Prepare credentials from the existing local `.streamlit/secrets.toml`:
+This is a coordinated schema and code cutover. Do not deploy the old Worker against the new schema or roll back only the code. Production deployment is a separate release operation.
+
+1. Run the local checks below. Rehearse on a populated copy; tests also compare every migrated row and exercise the real D1 runtime.
+2. Schedule a maintenance window and block public traffic at the edge during the cutover. Stop workout edits. Save a D1 export, record the database's Time Travel bookmark, the current Worker version, the old code, and the old authentication secrets in secure storage. Compare all five tables before/after migration, not only their counts.
+3. Prepare the credential import locally from the existing ignored `.env.auth-upload.json`:
+
+   ```powershell
+   node scripts/bootstrap-users.mjs
+   ```
+
+   This creates `exports/users-bootstrap-<timestamp>/bootstrap.sql`, backs up the legacy authentication JSON in the same ignored directory, and rewrites `.env.auth-upload.json` and `.dev.vars` with the two required Worker secrets. It does not contact Cloudflare or change a database. It preserves your existing password verifier, username, and authenticator enrollment, and encrypts the authenticator secret. Do not print or commit these files. The script refuses a converted input. Reuse its output after a failed cutover; do not generate a new key.
+
+   If the legacy JSON is missing, `scripts/prepare_worker_auth.py` can derive it from the original Streamlit secrets **before** conversion. That tool refuses to overwrite converted credentials.
+
+4. While traffic is blocked, apply the migrations and the prepared SQL to the existing database:
+
+   ```powershell
+   npx wrangler d1 migrations apply progresql --remote
+   npx wrangler d1 execute progresql --remote --file exports/users-bootstrap-<timestamp>/bootstrap.sql
+   ```
+
+   `0003_users.sql` creates user 1, assigns all existing workout records to it, preserves keys/timestamps/relationships and ID sequences, and expires old sessions. It stages all copies before dropping child tables to avoid cascade-related data loss. `0004_user_guards.sql` prevents ownership changes and removal of the last admin. The credential import activates user 1 as the admin and has a one-time marker plus placeholder checks. Reapplying it cannot overwrite an enrolled account or restore old credentials.
+
+5. Verify row comparisons, `PRAGMA foreign_key_check`, user 1's active/admin status, and the bootstrap marker without selecting secret columns. Deploy the tested code with the new secret file using the normal release process. Old per-user Worker secrets can be removed after the migration is accepted; the new code ignores them.
+6. Verify HTTPS login with your existing credentials, all original records, logout/revocation, and unauthenticated API rejection. Verify isolation using dedicated temporary accounts only if authorized for that release. Reopen traffic after checks pass. Monitor Worker errors, authentication failures, and D1 usage; application error logs omit credentials and row contents.
+
+If a step fails before reopening traffic, restore the pre-cutover database and the matching old Worker code/secrets together. If new data has been written, export and reconcile it before restoring. Keep the legacy Streamlit app archived; it does not support multiple users and must not serve the shared application.
+
+Cloudflare references: [foreign keys and migrations](https://developers.cloudflare.com/d1/sql-api/foreign-keys/), [D1 commands](https://developers.cloudflare.com/d1/wrangler-commands/), [generated Worker types](https://developers.cloudflare.com/workers/languages/typescript/).
+
+## Local setup and checks
 
 ```powershell
-.venv/Scripts/python.exe scripts/prepare_worker_auth.py
+npm ci
+npm run db:migrate
+npm run dev
 ```
 
-This creates ignored `.env.auth-upload.json` and `.dev.vars` files. It preserves the username and TOTP secret and converts the existing Argon2id hash without needing the plaintext password. Do not commit, share, or print these files. `npm run deploy` supplies the five values as Worker secrets through Wrangler's `--secrets-file` option.
-
-The browser performs the original Argon2id calculation with the public salt and parameters. Over HTTPS it sends the resulting password-equivalent proof, username, and six-digit authenticator code. The Worker checks a peppered HMAC of the proof and the TOTP. Only the salt and work parameters are public; the original hash, pepper, verifier, and authenticator secret are never returned to the browser. Keeping the expensive Argon2 calculation in the browser avoids exhausting Workers Free's CPU allowance. Treat the transmitted proof as sensitive, just like a password; never log request bodies or store it in browser storage.
-
-Sessions last one hour. A secure, HttpOnly, SameSite=Strict cookie holds a random token; D1 stores only its SHA-256 hash. Logout revokes the session, and credential changes invalidate existing sessions. Mutations require a matching Origin. Login attempts are limited to 10 per IP and 30 globally in a five-minute window. Each authenticator time step can be used only once, including concurrent requests; after signing out, wait for the next code before signing in again. The TOTP settings match the old app: SHA-1, six digits, 30-second period, and a one-step clock allowance.
-
-For real local login, build and migrate first, then run:
+The explicit `LOCAL_DEV` flag bypasses login only on loopback and resolves to database user 1. This is enough to develop workout screens. To exercise account administration with real credentials, prepare/import the bootstrap SQL into the **local** database and run Wrangler without `LOCAL_DEV`:
 
 ```powershell
+npx wrangler d1 execute progresql --local --file exports/users-bootstrap-<timestamp>/bootstrap.sql
+npm run build
 npx wrangler dev --ip 127.0.0.1 --local-upstream 127.0.0.1 --upstream-protocol http --port 8787
 ```
 
-The normal `dev` and `preview` scripts explicitly bypass login on loopback for convenience. Browser tests instead use fake credentials and exercise the real login flow against an isolated local database.
-
-## Data migration
-
-Stop making changes in the old app during final export/cutover, then create a snapshot:
+Never enable `LOCAL_DEV` in production. The predeploy check rejects it and requires both authentication secrets. Future deployments reuse the same secrets; they do not run the bootstrap import.
 
 ```powershell
-.venv/Scripts/python.exe scripts/export_to_d1.py
-```
-
-The export is read-only against PostgreSQL. It preserves all five tables, primary keys, relationships, and timestamps. The ignored export directory includes SQLite, SQL, and a manifest with counts and checksum. The exporter validates foreign keys, integrity, and replay of the SQL.
-
-For an empty destination database:
-
-```powershell
-npx wrangler d1 migrations apply progresql --remote
-npx wrangler d1 execute progresql --remote --file exports/<timestamp>/import.sql
-```
-
-The import deliberately fails against populated application tables. Do not rerun it into a live populated database. If PostgreSQL receives writes after the snapshot, coordinate a new cutover instead of assuming the copy is current. Subsequent schema migrations are safe to apply separately and include the three authentication tables.
-
-Verify the application counts against the manifest and check foreign keys:
-
-```powershell
-npx wrangler d1 execute progresql --remote --command "SELECT 'exercise' AS name, COUNT(*) AS rows FROM exercise UNION ALL SELECT 'workout',COUNT(*) FROM workout UNION ALL SELECT 'exercise_settings_history',COUNT(*) FROM exercise_settings_history UNION ALL SELECT 'workout_exercise',COUNT(*) FROM workout_exercise UNION ALL SELECT 'workout_session',COUNT(*) FROM workout_session"
-npx wrangler d1 execute progresql --remote --command "PRAGMA foreign_key_check"
-```
-
-## Publish and verify
-
-```powershell
-npx wrangler login
-npm ci
+npm run typegen
 npm test
+npm run build
+$env:PW_CHROMIUM_CHANNEL = 'msedge'
 npm run test:browser
-npx wrangler deploy --dry-run --secrets-file .env.auth-upload.json
-npm run deploy
+.venv/Scripts/python.exe -m pytest
 ```
 
-The custom-domain route provisions the hostname and TLS. Check for an existing application at that hostname before attaching it. Deployment never upgrades the account plan. The predeploy check requires authentication secrets and rejects a production local bypass.
+Browser tests create fake credentials and users in `.wrangler/e2e`, apply all migrations, and use the real login/enrollment flows. They never contact the live database. On platforms without Edge, install Playwright Chromium and omit the channel variable.
 
-Check that an incognito visit shows the login form, unauthenticated `/api/data` returns 401, existing credentials plus an Authenticator code open the journal, historical sessions match the migration, and logout revokes access. Worker logs omit credentials and workout row contents.
-
-Free-tier quotas still apply; review [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/) and [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/) as usage grows. No paid upgrade is necessary for this implementation.
-
-The app fetches the five-table dataset in one authenticated request and resolves browsing/date changes locally. Mutations refresh that snapshot. If the journal grows substantially, add pagination and targeted reads. Administrative saves allow at most 45 changed/deleted rows per request to stay within free-plan query limits.
-
-Use D1 exports/Time Travel for ongoing backups. The UI JSON export is a convenient data copy, not a replacement for a database backup. Keep the original source until the migration is accepted. After new D1 writes, export and reconcile them before rolling back to PostgreSQL.
+The Python PostgreSQL exporter remains a legacy single-user tool targeting migration `0001`. Its SQL cannot be imported directly into the new owned tables. Existing production D1 records migrate in place; do not rerun the old PostgreSQL import during this cutover.

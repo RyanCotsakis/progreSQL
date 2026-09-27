@@ -1,6 +1,12 @@
 import { localDay } from "../shared/model";
 import { totpAt } from "../worker/auth";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+test.beforeEach(async ({ page }, info) => {
+  // Distinct simulated edge IP per test; production Cloudflare overwrites this header.
+  await page.context().setExtraHTTPHeaders({
+    "CF-Connecting-IP": `${info.project.name}:${info.title}`,
+  });
+});
 
 test("create, prescribe, arrange, log, and revisit a workout on desktop and mobile", async ({
   page,
@@ -233,4 +239,233 @@ test("create, prescribe, arrange, log, and revisit a workout on desktop and mobi
   ).toBeVisible();
   expect((await page.request.get("/api/data")).status()).toBe(401);
   expect(errors).toEqual([]);
+});
+
+const browserSecret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+async function signIn(
+  page: Page,
+  username: string,
+  password = "browser-test-password",
+  secret = browserSecret,
+  offset = -1,
+) {
+  await page.goto("/");
+  await page.getByLabel("Username", { exact: true }).fill(username);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page
+    .getByLabel("Authenticator code", { exact: true })
+    .fill(await totpAt(secret, Math.floor(Date.now() / 30000) + offset));
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Your workout journal" }),
+  ).toBeVisible();
+}
+async function confirmAdmin(page: Page) {
+  const dialog = page.getByRole("dialog");
+  await dialog
+    .getByLabel("Your password", { exact: true })
+    .fill("browser-test-password");
+  await dialog
+    .getByLabel("Your authenticator code", { exact: true })
+    .fill(await totpAt(browserSecret, Math.floor(Date.now() / 30000)));
+  await dialog.getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+}
+test("invite a friend, enroll an authenticator, and keep their library private", async ({
+  page,
+  browser,
+}, testInfo) => {
+  const device = testInfo.project.name,
+    username = `${device}-new-friend`;
+  await signIn(page, `${device}-inviter`);
+  await page.getByRole("button", { name: "Users", exact: true }).click();
+  await page.getByRole("button", { name: "Create user", exact: true }).click();
+  await page
+    .getByRole("dialog")
+    .getByLabel("Username", { exact: true })
+    .fill(username);
+  await confirmAdmin(page);
+  const link = await page
+    .getByLabel("Setup link", { exact: true })
+    .inputValue();
+  const context = await browser.newContext({
+    baseURL: "http://127.0.0.1:8788",
+    viewport: page.viewportSize()!,
+  });
+  const friend = await context.newPage();
+  try {
+    await friend.goto(link);
+    await expect(
+      friend.getByAltText("Authenticator setup QR code"),
+    ).toBeVisible();
+    expect(new URL(friend.url()).hash).toBe("");
+    await friend
+      .getByText("Enter a setup key manually", { exact: true })
+      .click();
+    const secret = (await friend.locator("code").textContent())!;
+    await friend
+      .getByLabel("New password", { exact: true })
+      .fill("a-new-friend-password");
+    await friend
+      .getByLabel("Confirm password", { exact: true })
+      .fill("a-new-friend-password");
+    await friend
+      .getByLabel("Authenticator code", { exact: true })
+      .fill(await totpAt(secret, Math.floor(Date.now() / 30000)));
+    await friend.getByRole("button", { name: "Complete setup" }).click();
+    await expect(
+      friend.getByRole("heading", { name: "Account ready" }),
+    ).toBeVisible();
+    await friend.getByRole("button", { name: "Go to sign in" }).click();
+    await signIn(friend, username, "a-new-friend-password", secret, 1);
+    await expect(
+      friend.getByRole("button", { name: "Data manager", exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      friend.getByRole("button", { name: "Users", exact: true }),
+    ).toHaveCount(0);
+    await friend
+      .getByRole("button", { name: "My library", exact: true })
+      .click();
+    await friend
+      .getByRole("button", { name: "New workout", exact: true })
+      .click();
+    const dialog = friend.getByRole("dialog");
+    await dialog
+      .getByLabel("Workout name", { exact: true })
+      .fill("Friend workout");
+    await dialog
+      .getByRole("button", { name: "Create workout", exact: true })
+      .click();
+    await expect(dialog).not.toBeVisible();
+    await page
+      .getByRole("button", { name: "Data manager", exact: true })
+      .click();
+    await expect(
+      page.getByLabel("Database table", { exact: true }),
+    ).toBeVisible();
+    const options = await page
+      .getByLabel("Record owner", { exact: true })
+      .locator("option")
+      .allTextContents();
+    await page.getByLabel("Record owner", { exact: true }).selectOption({
+      label: options.find((o) => o.startsWith(username + " ("))!,
+    });
+    await page
+      .getByLabel("Database table", { exact: true })
+      .selectOption("workout");
+    await expect(page.locator('input[value="Friend workout"]')).toBeVisible();
+    await page.getByRole("button", { name: "My library", exact: true }).click();
+    await expect(
+      page.getByRole("button", { name: "Friend workout", exact: true }),
+    ).toHaveCount(0);
+    expect(
+      await friend.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+    const otherTab = await page.context().newPage();
+    await otherTab.goto("/");
+    await otherTab
+      .getByRole("button", { name: "Data manager", exact: true })
+      .click();
+    await expect(
+      otherTab.getByLabel("Database table", { exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole("link", { name: "Sign out", exact: true })
+      .filter({ visible: true })
+      .click();
+    await expect(
+      otherTab.getByRole("heading", { name: "Welcome back" }),
+    ).toBeVisible();
+    await expect(
+      otherTab.getByLabel("Database table", { exact: true }),
+    ).toHaveCount(0);
+    await otherTab.close();
+  } finally {
+    await context.close();
+  }
+});
+
+for (const kind of ["password", "recover"] as const) {
+  test(`${kind} recovery requires setup before login`, async ({
+    page,
+    browser,
+  }, testInfo) => {
+    const device = testInfo.project.name,
+      username = `${device}-${kind}-user`;
+    await signIn(page, `${device}-${kind}-admin`);
+    await page.getByRole("button", { name: "Users", exact: true }).click();
+    // Use the shared card's direct parent to avoid selecting a list wrapper.
+    const row = page.getByText(username, { exact: true }).locator("../..");
+    await row
+      .getByRole("button", {
+        name: kind === "password" ? "Reset password" : "Recover account",
+        exact: true,
+      })
+      .click();
+    await confirmAdmin(page);
+    const link = await page
+      .getByLabel("Setup link", { exact: true })
+      .inputValue();
+    const context = await browser.newContext({
+      baseURL: "http://127.0.0.1:8788",
+      viewport: page.viewportSize()!,
+    });
+    const recovery = await context.newPage();
+    try {
+      await recovery.goto(link);
+      await expect(
+        recovery.getByLabel("New password", { exact: true }),
+      ).toBeVisible();
+      let secret = browserSecret;
+      if (kind === "recover") {
+        await expect(
+          recovery.getByAltText("Authenticator setup QR code"),
+        ).toBeVisible();
+        await recovery
+          .getByText("Enter a setup key manually", { exact: true })
+          .click();
+        secret = (await recovery.locator("code").textContent())!;
+      } else
+        await expect(
+          recovery.getByAltText("Authenticator setup QR code"),
+        ).toHaveCount(0);
+      await recovery
+        .getByLabel("New password", { exact: true })
+        .fill("replacement-password");
+      await recovery
+        .getByLabel("Confirm password", { exact: true })
+        .fill("replacement-password");
+      await recovery
+        .getByLabel("Authenticator code", { exact: true })
+        .fill(await totpAt(secret, Math.floor(Date.now() / 30000)));
+      await recovery.getByRole("button", { name: "Complete setup" }).click();
+      await expect(
+        recovery.getByRole("heading", { name: "Account ready" }),
+      ).toBeVisible();
+      await signIn(recovery, username, "replacement-password", secret, 1);
+    } finally {
+      await context.close();
+    }
+  });
+}
+
+test("delete a user with typed confirmation", async ({ page }, testInfo) => {
+  const device = testInfo.project.name,
+    username = `${device}-delete-user`;
+  await signIn(page, `${device}-delete-admin`);
+  await page.getByRole("button", { name: "Users", exact: true }).click();
+  await page
+    .getByText(username, { exact: true })
+    .locator("../..")
+    .getByRole("button", { name: "Delete user", exact: true })
+    .click();
+  await page
+    .getByLabel(`Type ${username} to confirm`, { exact: true })
+    .fill(username);
+  await page.getByRole("checkbox").check();
+  await confirmAdmin(page);
+  await expect(page.getByText(username, { exact: true })).toHaveCount(0);
 });

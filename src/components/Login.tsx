@@ -1,3 +1,4 @@
+import { api, passwordProof } from "../lib/api";
 import { useState, type FormEvent } from "react";
 import { Dumbbell, Loader2, LockKeyhole } from "lucide-react";
 import { Button } from "./ui/button";
@@ -22,33 +23,16 @@ export function Login({
     const element = event.currentTarget;
     const fields = new FormData(element);
     try {
-      const response = await fetch("/api/auth/config");
-      if (!response.ok)
-        throw new Error("Login is not configured yet. Please try again later.");
-      const params: PasswordParameters = await response.json();
-      const { argon2id } = await import("hash-wasm");
-      const proof = await argon2id({
-        password: String(fields.get("password")),
-        salt: Uint8Array.from(atob(params.salt), (c) => c.charCodeAt(0)),
-        iterations: params.iterations,
-        memorySize: params.memorySize,
-        parallelism: params.parallelism,
-        hashLength: params.hashLength,
-        outputType: "hex",
+      const username = String(fields.get("username")).trim();
+      const params = await api<PasswordParameters>(
+        `/api/auth/config?username=${encodeURIComponent(username)}`,
+      );
+      const proof = await passwordProof(String(fields.get("password")), params);
+      await api("/api/auth/login", {
+        username,
+        proof,
+        code: fields.get("code"),
       });
-      const login = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username: fields.get("username"),
-          proof,
-          code: fields.get("code"),
-        }),
-      });
-      if (!login.ok) {
-        const result = (await login.json()) as { error?: string };
-        throw new Error(result.error || "Could not sign in.");
-      }
       element.reset();
       await onSuccess();
     } catch (error) {

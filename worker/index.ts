@@ -1,3 +1,9 @@
+import {
+  adminRequestSchema,
+  setupRequestSchema,
+  completeRequestSchema,
+} from "../shared/users";
+import { manageUser, listUsers, inspectSetup, completeSetup } from "./users";
 import { actionSchema } from "../shared/actions";
 import {
   authorize,
@@ -7,15 +13,18 @@ import {
   parameters,
   isLoopback,
   type Env,
+  consumeAttempt,
+  reauthenticate,
 } from "./auth";
 import { mutate, readData, ValidationError } from "./service";
 
-const json = (data: unknown, status = 200) =>
+const json = (data: unknown, status = 200, userId?: number) =>
   Response.json(data, {
     status,
     headers: {
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
+      ...(userId === undefined ? {} : { "X-ProgreSQL-User": String(userId) }),
     },
   });
 
@@ -46,21 +55,54 @@ const app = {
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
     if (request.method === "GET" && url.pathname === "/api/auth/config") {
       try {
-        return json(parameters(env));
-      } catch {
-        return json({ error: "Login is not configured yet." }, 503);
+        const username = (url.searchParams.get("username") || "").slice(0, 200);
+        await consumeAttempt(request, env, "config", username);
+        return json(await parameters(env, username));
+      } catch (error) {
+        return json(
+          {
+            error:
+              error instanceof AuthError
+                ? error.message
+                : "Login is not configured yet.",
+          },
+          error instanceof AuthError ? error.status : 503,
+        );
       }
     }
-    const authMutation = ["/api/auth/login", "/api/auth/logout"].includes(
-      url.pathname,
-    );
-    if (!authMutation && !(await authorize(request, env)))
-      return json({ error: "Your session has expired. Please sign in." }, 401);
+    const authMutation = [
+      "/api/auth/login",
+      "/api/auth/logout",
+      "/api/auth/setup",
+      "/api/auth/complete",
+    ].includes(url.pathname);
+    const user = authMutation ? null : await authorize(request, env);
+    if (!authMutation && !user)
+      return json(
+        {
+          error: "Your session has expired. Please sign in.",
+          code: "session_expired",
+        },
+        401,
+      );
     if (request.method === "GET" && url.pathname === "/api/auth/session")
-      return json({ authenticated: true });
-    if (request.method === "GET" && url.pathname === "/api/data") {
+      return json(user);
+    const adminRoute = url.pathname.startsWith("/api/admin/");
+    if (adminRoute && !user?.is_admin)
+      return json({ error: "Admin access required." }, 403);
+    if (request.method === "GET" && url.pathname === "/api/admin/users")
+      return json(await listUsers(env), 200, user!.user_id);
+    if (
+      request.method === "GET" &&
+      ["/api/data", "/api/admin/data"].includes(url.pathname) &&
+      user
+    ) {
       try {
-        return json(await readData(env.DB));
+        return json(
+          await readData(env.DB, user, adminRoute),
+          200,
+          user.user_id,
+        );
       } catch {
         return json(
           {
@@ -73,7 +115,8 @@ const app = {
     }
     if (
       request.method !== "POST" ||
-      (!authMutation && url.pathname !== "/api/actions")
+      (!authMutation &&
+        !["/api/actions", "/api/admin/users"].includes(url.pathname))
     )
       return json({ error: "Not found." }, 404);
     // No cross-origin mutations, including requests with an absent Origin header.
@@ -101,6 +144,44 @@ const app = {
       } catch {
         return json({ error: "Invalid JSON." }, 400);
       }
+      if (["/api/auth/setup", "/api/auth/complete"].includes(url.pathname)) {
+        const parsed = setupRequestSchema.safeParse(body);
+        if (!parsed.success)
+          return json({ error: "Invalid setup request." }, 400);
+        await consumeAttempt(
+          request,
+          env,
+          url.pathname.endsWith("/complete") ? "complete" : "setup",
+          parsed.data.token,
+        );
+        if (url.pathname.endsWith("/complete")) {
+          const complete = completeRequestSchema.safeParse(body);
+          if (!complete.success)
+            return json({ error: "Invalid setup request." }, 400);
+          return json(
+            await completeSetup(
+              env,
+              complete.data.token,
+              complete.data.proof,
+              complete.data.code,
+            ),
+          );
+        }
+        return json(await inspectSetup(env, parsed.data.token));
+      }
+      if (url.pathname === "/api/admin/users" && user) {
+        const parsed = adminRequestSchema.safeParse(body);
+        if (!parsed.success)
+          return json({ error: parsed.error.issues[0].message }, 400);
+        await reauthenticate(
+          request,
+          env,
+          user,
+          parsed.data.proof,
+          parsed.data.code,
+        );
+        return json(await manageUser(env, user, parsed.data.operation));
+      }
       if (authMutation) {
         const cookie =
           url.pathname === "/api/auth/login"
@@ -113,7 +194,8 @@ const app = {
       const result = actionSchema.safeParse(body);
       if (!result.success)
         return json({ error: result.error.issues[0].message }, 400);
-      await mutate(env.DB, result.data);
+      if (!user) throw new AuthError("Please sign in.");
+      await mutate(env.DB, result.data, user);
       return json({ ok: true });
     } catch (error) {
       if (error instanceof AuthError) {
@@ -124,10 +206,13 @@ const app = {
       if (error instanceof ValidationError)
         return json({ error: error.message }, 400);
       const message = error instanceof Error ? error.message : "";
+      if (message.includes("Keep at least one admin."))
+        return json({ error: "Keep at least one admin." }, 400);
       if (message.includes("UNIQUE constraint"))
         return json(
           {
-            error: "That name, effective date, or workout log already exists.",
+            error:
+              "That username, name, effective date, or workout log already exists.",
           },
           409,
         );

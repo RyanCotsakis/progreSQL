@@ -1,3 +1,7 @@
+import { api, clearRequests } from "./lib/api";
+import type { Identity, UserSummary } from "../shared/users";
+import { Users } from "./components/Users";
+import { Setup } from "./components/Setup";
 import {
   relativeDay,
   shiftDay,
@@ -8,6 +12,7 @@ import {
 import { Login } from "./components/Login";
 import {
   useCallback,
+  useRef,
   useEffect,
   useState,
   type FormEvent,
@@ -27,6 +32,7 @@ import {
   LayoutGrid,
   Loader2,
   LogOut,
+  LockKeyhole,
   Pencil,
   Plus,
   Search,
@@ -54,7 +60,7 @@ import {
 import type { Action } from "../shared/actions";
 
 type Run = (action: Action, message?: string) => Promise<boolean>;
-type Page = "journal" | "library" | "history" | "admin";
+type Page = "journal" | "library" | "history" | "admin" | "users";
 type Modal = { type: "exercise" | "workout" | "session"; id?: number } | null;
 const fmt = (
   day: string,
@@ -78,24 +84,42 @@ const stateFields = (data: FormData) => ({
   notes: str(data, "notes"),
 });
 
-class AuthenticationRequired extends Error {
-  constructor() {
-    super("Please sign in to open your journal.");
-  }
-}
 async function getData(): Promise<AppData> {
-  const response = await fetch("/api/data");
-  if (response.status === 401) throw new AuthenticationRequired();
-  if (!response.ok)
-    throw new Error(
-      response.status === 401
-        ? "Please sign in to open your private journal."
-        : "Could not load your journal. Check your connection and try again.",
-    );
-  return response.json();
+  return api<AppData>("/api/data");
 }
-
 export default function App() {
+  const [token, setToken] = useState(
+    () => new URLSearchParams(location.hash.slice(1)).get("setup") || "",
+  );
+  useEffect(() => {
+    if (new URLSearchParams(location.hash.slice(1)).has("setup"))
+      history.replaceState(null, "", location.pathname + location.search);
+    const read = () => {
+      const next = new URLSearchParams(location.hash.slice(1)).get("setup");
+      if (next) {
+        clearRequests();
+        setToken(next);
+        history.replaceState(null, "", location.pathname + location.search);
+      }
+    };
+    window.addEventListener("hashchange", read);
+    return () => window.removeEventListener("hashchange", read);
+  }, []);
+  return token ? (
+    <Setup
+      token={token}
+      onDone={() => {
+        clearRequests();
+        setToken("");
+      }}
+    />
+  ) : (
+    <WorkoutApp />
+  );
+}
+function WorkoutApp() {
+  const [user, setUser] = useState<Identity>();
+  const epoch = useRef(0);
   const [data, setData] = useState<AppData>();
   const [page, setPage] = useState<Page>("journal");
   const [modal, setModal] = useState<Modal>(null);
@@ -105,24 +129,45 @@ export default function App() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
+  const clear = useCallback(() => {
+    epoch.current++;
+    clearRequests();
+    setData(undefined);
+    setUser(undefined);
+    setModal(null);
+    setPage("journal");
+    setWorkoutId(0);
+    setNotice("");
+    setError("");
+    setLoading(false);
+    setSaving(false);
+  }, []);
   const refresh = useCallback(async () => {
+    const version = epoch.current;
     setLoading(true);
     setError("");
     try {
-      setData(await getData());
+      const identity = await api<Identity>("/api/auth/session");
+      const snapshot = await getData();
+      if (version !== epoch.current) return;
+      setUser(identity);
+      setData(snapshot);
     } catch (e) {
-      if (e instanceof AuthenticationRequired) {
-        setData(undefined);
-        setModal(null);
-      }
-      setError((e as Error).message);
+      if (version === epoch.current && (e as Error).name !== "AbortError")
+        setError((e as Error).message);
     } finally {
-      setLoading(false);
+      if (version === epoch.current) setLoading(false);
     }
   }, []);
   useEffect(() => {
+    window.addEventListener("session-expired", clear);
     void refresh();
-  }, [refresh]);
+    return () => {
+      window.removeEventListener("session-expired", clear);
+      epoch.current++;
+      clearRequests();
+    };
+  }, [refresh, clear]);
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => setNotice(""), 4500);
@@ -130,67 +175,51 @@ export default function App() {
   }, [notice]);
   const run: Run = async (action, message = "Changes saved.") => {
     if (saving) return false;
+    const version = epoch.current;
     setSaving(true);
     setError("");
     setNotice("");
     try {
-      const response = await fetch("/api/actions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(action),
-      });
-      if (response.status === 401) {
-        setData(undefined);
-        setModal(null);
-        throw new AuthenticationRequired();
-      }
-      if (!response.ok) {
-        const result = (await response.json()) as { error?: string };
-        throw new Error(result.error || "Could not save changes.");
-      }
-      try {
-        setData(await getData());
-        setNotice(message);
-      } catch {
-        setError(
-          "Your changes were saved, but the view could not refresh. Reload before making more changes.",
-        );
-      }
+      await api("/api/actions", action);
+      const snapshot = await getData();
+      if (version !== epoch.current) return false;
+      setData(snapshot);
+      setNotice(message);
       return true;
     } catch (e) {
-      setError((e as Error).message);
+      if (version === epoch.current && (e as Error).name !== "AbortError")
+        setError((e as Error).message);
       return false;
     } finally {
-      setSaving(false);
+      if (version === epoch.current) setSaving(false);
     }
   };
   async function signOut() {
+    clear();
+    setLoading(true);
     try {
-      const response = await fetch("/api/auth/logout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: "{}",
-      });
-      if (!response.ok) throw new Error("Could not sign out.");
-      setData(undefined);
-      setModal(null);
-      setError("");
-      setNotice("");
+      await api("/api/auth/logout", {});
     } catch {
-      setError("Could not sign out. Please try again.");
+      setError(
+        "Could not revoke the session. Close this browser to finish signing out.",
+      );
+    } finally {
+      setLoading(false);
     }
   }
   useEffect(() => {
-    if (!data) return;
+    if (!user) return;
     const check = async () => {
       try {
-        const response = await fetch("/api/auth/session");
-        if (response.status === 401) {
-          setData(undefined);
-          setModal(null);
-        }
+        const current = await api<Identity>("/api/auth/session");
+        if (
+          current.user_id !== user.user_id ||
+          current.is_admin !== user.is_admin ||
+          current.username !== user.username
+        )
+          clear();
       } catch {
-        /* The next API call will retry authentication. */
+        /* API clears expired sessions. */
       }
     };
     const timer = setInterval(() => void check(), 60000);
@@ -199,14 +228,19 @@ export default function App() {
       clearInterval(timer);
       window.removeEventListener("focus", check);
     };
-  }, [!!data]);
-  if (!data)
+  }, [user, clear]);
+  if (!data || !user)
     return <Login loading={loading} onSuccess={refresh} initialError={error} />;
   const nav = [
     { id: "journal" as const, icon: CalendarDays, label: "Workout journal" },
     { id: "library" as const, icon: LayoutGrid, label: "My library" },
     { id: "history" as const, icon: History, label: "Session history" },
-    { id: "admin" as const, icon: Database, label: "Data manager" },
+    ...(user.is_admin
+      ? [
+          { id: "admin" as const, icon: Database, label: "Data manager" },
+          { id: "users" as const, icon: LockKeyhole, label: "Users" },
+        ]
+      : []),
   ];
   const activeWorkouts = data?.workouts.filter((w) => w.is_active) || [];
   const selectedId = activeWorkouts.some((w) => w.workout_id === workoutId)
@@ -268,7 +302,7 @@ export default function App() {
       <div className="min-w-0 lg:col-start-2">
         <header className="flex h-16 items-center justify-between border-b px-5 sm:px-10">
           <span className="text-sm text-foreground">
-            {nav.find((n) => n.id === page)?.label}
+            {nav.find((n) => n.id === page)?.label} · {user.username}
           </span>
           <span className="hidden items-center gap-2 text-xs text-muted-foreground sm:flex">
             <span className="size-1.5 rounded-full bg-primary" />
@@ -318,9 +352,8 @@ export default function App() {
               {page === "history" && (
                 <HistoryPage data={data} open={setModal} />
               )}
-              {page === "admin" && (
-                <Admin data={data} run={run} saving={saving} />
-              )}
+              {page === "admin" && !!user.is_admin && <AdminPage />}
+              {page === "users" && !!user.is_admin && <Users user={user} />}
             </>
           }
         </main>
@@ -1814,6 +1847,92 @@ function SessionDetail({
   );
 }
 
+function AdminPage() {
+  const [data, setData] = useState<AppData>();
+  const [users, setUsers] = useState<UserSummary[]>([]);
+  const [owner, setOwner] = useState(0);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    const c = new AbortController();
+    void Promise.all([
+      api<AppData>("/api/admin/data", undefined, c.signal),
+      api<UserSummary[]>("/api/admin/users", undefined, c.signal),
+    ])
+      .then(([d, u]) => {
+        if (!c.signal.aborted) {
+          setData(d);
+          setUsers(u);
+        }
+      })
+      .catch((e) => {
+        if (!c.signal.aborted) setError(e.message);
+      });
+    return () => {
+      alive.current = false;
+      c.abort();
+    };
+  }, []);
+  const run: Run = async (action) => {
+    setSaving(true);
+    setError("");
+    try {
+      await api("/api/actions", action);
+      const next = await api<AppData>("/api/admin/data");
+      if (!alive.current) return false;
+      setData(next);
+      return true;
+    } catch (e) {
+      if (alive.current && (e as Error).name !== "AbortError")
+        setError((e as Error).message);
+      return false;
+    } finally {
+      if (alive.current) setSaving(false);
+    }
+  };
+  const filtered =
+    data &&
+    (Object.fromEntries(
+      Object.entries(data).map(([key, rows]) => [
+        key,
+        owner
+          ? rows.filter((r: { user_id: number }) => r.user_id === owner)
+          : rows,
+      ]),
+    ) as AppData | undefined);
+  return (
+    <>
+      <label className="mb-5 block">
+        Record owner
+        <Select
+          aria-label="Record owner"
+          value={owner}
+          onChange={(e) => setOwner(Number(e.target.value))}
+        >
+          <option value={0}>All users</option>
+          {users.map((u) => (
+            <option value={u.user_id} key={u.user_id}>
+              {u.username} (#{u.user_id})
+            </option>
+          ))}
+        </Select>
+      </label>
+      {error && (
+        <p role="alert" className="my-4 text-destructive">
+          {error}
+        </p>
+      )}
+      {filtered ? (
+        <Admin key={owner} data={filtered} run={run} saving={saving} />
+      ) : (
+        <p>Loading records…</p>
+      )}
+    </>
+  );
+}
+
 function Admin({
   data,
   run,
@@ -1893,10 +2012,10 @@ function Admin({
       <Heading
         eyebrow="Administration"
         title="Data manager"
-        description="Inspect, export, and maintain your workout records."
+        description="Inspect, export, and maintain the selected users’ workout records."
       >
         <Button variant="outline" onClick={download}>
-          Export all data
+          Export displayed data
         </Button>
       </Heading>
       <Card>
@@ -1954,8 +2073,8 @@ function Admin({
                     </td>
                     {tableColumns[table].map((column) => (
                       <td key={column}>
-                        {column === pk ? (
-                          id
+                        {column === pk || column === "user_id" ? (
+                          row[column]
                         ) : (
                           <Input
                             aria-label={`${column} row ${id}`}
@@ -2046,7 +2165,7 @@ function Admin({
               className="font-mono"
               value={payload}
               onChange={(e) => setPayload(e.target.value)}
-              placeholder={'{"column_name": "value"}'}
+              placeholder={'{"user_id": 1, "column_name": "value"}'}
               required
             />
             {parseError && (
