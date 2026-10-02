@@ -179,8 +179,10 @@ function WorkoutApp() {
     setSaving(true);
     setError("");
     setNotice("");
+    let saved = false;
     try {
       await api("/api/actions", action);
+      saved = true;
       const snapshot = await getData();
       if (version !== epoch.current) return false;
       setData(snapshot);
@@ -188,7 +190,11 @@ function WorkoutApp() {
       return true;
     } catch (e) {
       if (version === epoch.current && (e as Error).name !== "AbortError")
-        setError((e as Error).message);
+        setError(
+          saved
+            ? "Your changes were saved, but the updated data could not be loaded. Reload the page to see them."
+            : (e as Error).message,
+        );
       return false;
     } finally {
       if (version === epoch.current) setSaving(false);
@@ -358,10 +364,10 @@ function WorkoutApp() {
           }
         </main>
         <footer className="mx-auto flex max-w-[1300px] justify-between px-5 py-6 text-xs text-muted-foreground sm:px-10">
-          <span>ProgreSQL · 3.0.1</span>
+          <span>ProgreSQL · 3.0.2</span>
         </footer>
       </div>
-      {((error && data) || notice) && (
+      {((error && data && !modal) || (notice && !error)) && (
         <div
           role={error ? "alert" : "status"}
           className={cn(
@@ -406,6 +412,14 @@ function WorkoutApp() {
             if (!saving) setModal(null);
           }}
         >
+          {error && (
+            <p
+              role="alert"
+              className="mb-4 rounded-lg border border-destructive/30 p-3 text-sm text-destructive"
+            >
+              {error}
+            </p>
+          )}
           {modal.type === "exercise" && (
             <ExerciseEditor
               key={modal.id || "new"}
@@ -699,11 +713,14 @@ function Journal({
   const exists = logged.some((s) => s.workout_id === workoutId);
   const today = localDay();
   const latest = latestWorkouts(data.sessions, today);
-  const startWeek = new Date(today + "T12:00:00");
-  startWeek.setDate(startWeek.getDate() - ((startWeek.getDay() + 6) % 7));
-  const weekCount = data.sessions.filter(
-    (s) => s.workout_date >= localDay(startWeek) && s.workout_date <= today,
-  ).length;
+  const consistencyStart = shiftDay(today, -27);
+  const trainingDays = new Set(
+    data.sessions
+      .filter(
+        (s) => s.workout_date >= consistencyStart && s.workout_date <= today,
+      )
+      .map((s) => s.workout_date),
+  ).size;
   return (
     <>
       <Heading
@@ -714,9 +731,9 @@ function Journal({
       <div className="mb-8 grid grid-cols-2 gap-3 lg:grid-cols-[1fr_1fr_2fr] sm:gap-4">
         {[
           {
-            title: "This week",
-            value: weekCount,
-            suffix: "sessions logged",
+            title: "Consistency",
+            value: trainingDays,
+            suffix: "training days in the last 4 weeks",
             icon: Activity,
           },
           {
@@ -736,9 +753,7 @@ function Journal({
             <p className="mt-3 text-3xl font-semibold tracking-tight">
               {stat.value}
             </p>
-            <p className="mt-1 hidden text-xs text-muted-foreground sm:block">
-              {stat.suffix}
-            </p>
+            <p className="mt-1 text-xs text-muted-foreground">{stat.suffix}</p>
           </Card>
         ))}
         <Card className="col-span-2 min-w-0 !p-3 sm:!p-5 lg:col-span-1">
@@ -1594,6 +1609,7 @@ function WorkoutEditor({
               label="Apply changes from"
               type="date"
               value={effective}
+              disabled={saving}
               onChange={(e) => {
                 if (!e.target.value) return;
                 setEffective(e.target.value);
@@ -1611,6 +1627,7 @@ function WorkoutEditor({
             <Select
               aria-label="Add an exercise"
               value=""
+              disabled={saving}
               onChange={(e) => {
                 if (e.target.value) setIds([...ids, Number(e.target.value)]);
               }}
@@ -1644,7 +1661,7 @@ function WorkoutEditor({
                       size="icon"
                       variant="ghost"
                       aria-label={`Move exercise ${i + 1} up`}
-                      disabled={i === 0}
+                      disabled={saving || i === 0}
                       onClick={() => shift(i, -1)}
                     >
                       <ArrowUp />
@@ -1653,7 +1670,7 @@ function WorkoutEditor({
                       size="icon"
                       variant="ghost"
                       aria-label={`Move exercise ${i + 1} down`}
-                      disabled={i === ids.length - 1}
+                      disabled={saving || i === ids.length - 1}
                       onClick={() => shift(i, 1)}
                     >
                       <ArrowDown />
@@ -1662,6 +1679,7 @@ function WorkoutEditor({
                       size="icon"
                       variant="ghost"
                       aria-label={`Remove exercise ${i + 1}`}
+                      disabled={saving}
                       onClick={() => setIds(ids.filter((x) => x !== id))}
                     >
                       <Trash2 />
@@ -1689,7 +1707,8 @@ function WorkoutEditor({
                   close();
               }}
             >
-              <Check /> Save exercises
+              {saving ? <Loader2 className="animate-spin" /> : <Check />}
+              {saving ? "Saving exercises…" : "Save exercises"}
             </Button>
           </div>
           <ArchiveButton

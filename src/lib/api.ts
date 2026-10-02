@@ -26,6 +26,11 @@ export async function api<T>(
   signal?.addEventListener("abort", abort, { once: true });
   if (signal?.aborted) controller.abort();
   pending.add(controller);
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, 10000);
   try {
     const response = await fetch(path, {
       signal: controller.signal,
@@ -37,7 +42,11 @@ export async function api<T>(
             body: JSON.stringify(body),
           }),
     });
-    const data = await response.json();
+    const data = await response.json().catch(() => {
+      throw new Error(
+        "The server returned an unreadable response. Please reload and try again.",
+      );
+    });
     if (
       response.status === 401 &&
       ((data as { code?: string }).code === "session_expired" ||
@@ -70,7 +79,24 @@ export async function api<T>(
     if (path === "/api/auth/login" || path === "/api/auth/logout")
       channel?.postMessage("changed");
     return data as T;
+  } catch (error) {
+    if (version !== generation || signal?.aborted)
+      throw new DOMException("Request cancelled", "AbortError");
+    if (timedOut || error instanceof TypeError) {
+      const reason = timedOut
+        ? "The server took too long to respond."
+        : "Could not connect to the server.";
+      throw new Error(
+        `${reason} ${
+          body === undefined
+            ? "Check your connection and try again."
+            : "Your changes may have been saved. Check your connection and reload before trying again."
+        }`,
+      );
+    }
+    throw error;
   } finally {
+    clearTimeout(timeout);
     pending.delete(controller);
     signal?.removeEventListener("abort", abort);
   }

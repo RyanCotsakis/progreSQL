@@ -141,10 +141,34 @@ test("create, prescribe, arrange, log, and revisit a workout on desktop and mobi
   await dialog
     .getByLabel("Add an exercise", { exact: true })
     .selectOption({ label: exercise });
+  await page.route("**/api/actions", (route) => route.abort("failed"), {
+    times: 1,
+  });
   await dialog
     .getByRole("button", { name: "Save exercises", exact: true })
     .click();
-  await expect(dialog).not.toBeVisible();
+  await expect(page.getByRole("alert")).toContainText(
+    "Your changes may have been saved.",
+  );
+  await expect(dialog.getByRole("listitem")).toContainText(exercise);
+  await expect(
+    dialog.getByRole("button", { name: "Save exercises", exact: true }),
+  ).toBeEnabled();
+  // A confirmed save followed by a failed read must not be reported as a failed save.
+  await page.route("**/api/data", (route) => route.abort("failed"), {
+    times: 1,
+  });
+  await dialog
+    .getByRole("button", { name: "Save exercises", exact: true })
+    .click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Your changes were saved, but the updated data could not be loaded.",
+  );
+  await expect(dialog.getByRole("listitem")).toContainText(exercise);
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Your workout journal" }),
+  ).toBeVisible();
   await page
     .getByRole("button", { name: "Workout journal", exact: true })
     .click();
